@@ -135,23 +135,15 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     });
 
     try {
-      final allPids = await _rdpService.getAllWindowsAppPids();
       final List<RDPConnection> updatedConnections = [];
 
       for (final connection in _activeConnections) {
-        final isAlive = await _rdpService.isProcessAlive(connection.pid);
+        final isAlive = await _rdpService.isWindowAlive(connection.windowId);
 
         if (isAlive) {
           updatedConnections.add(connection);
-        } else {
-          final newConnection = await _findNewPidForConnection(
-            connection,
-            allPids,
-          );
-          if (newConnection != null) {
-            updatedConnections.add(newConnection);
-          }
         }
+        // Window가 사라진 경우 연결 목록에서 제거
       }
 
       setState(() {
@@ -168,31 +160,6 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     }
   }
 
-  Future<RDPConnection?> _findNewPidForConnection(
-    RDPConnection oldConnection,
-    List<int> availablePids,
-  ) async {
-    // 사용되지 않은 PID 중에서 새로운 PID 찾기
-    final usedPids = _activeConnections.map((c) => c.pid).toSet();
-    final unusedPids = availablePids
-        .where((pid) => !usedPids.contains(pid))
-        .toList();
-
-    if (unusedPids.isNotEmpty) {
-      // 가장 최근 PID를 새로운 PID로 사용
-      final newPid = unusedPids.last;
-      return RDPConnection(
-        server: oldConnection.server,
-        username: oldConnection.username,
-        port: oldConnection.port,
-        pid: newPid,
-        rdpFilePath: oldConnection.rdpFilePath,
-        connectedAt: oldConnection.connectedAt,
-      );
-    }
-
-    return null;
-  }
 
   Future<void> _refreshSingleConnection(int index) async {
     if (index >= _activeConnections.length) return;
@@ -203,43 +170,18 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     });
 
     try {
-      final isAlive = await _rdpService.isProcessAlive(connection.pid);
+      final isAlive = await _rdpService.isWindowAlive(connection.windowId);
 
       if (isAlive) {
         setState(() {
           _connectionStatus =
-              'Connection to ${connection.server} (PID: ${connection.pid}) is active';
-        });
-        return;
-      }
-
-      final allPids = await _rdpService.getAllWindowsAppPids();
-      final usedPids = _activeConnections.map((c) => c.pid).toSet();
-      final unusedPids = allPids
-          .where((pid) => !usedPids.contains(pid))
-          .toList();
-
-      if (unusedPids.isNotEmpty) {
-        final newPid = unusedPids.last;
-        final updatedConnection = RDPConnection(
-          server: connection.server,
-          username: connection.username,
-          port: connection.port,
-          pid: newPid,
-          rdpFilePath: connection.rdpFilePath,
-          connectedAt: connection.connectedAt,
-        );
-
-        setState(() {
-          _activeConnections[index] = updatedConnection;
-          _connectionStatus =
-              'Connection to ${connection.server} updated with new PID: $newPid';
+              'Connection to ${connection.server} (Window ID: ${connection.windowId}) is active';
         });
       } else {
         setState(() {
           _activeConnections.removeAt(index);
           _connectionStatus =
-              'Connection to ${connection.server} removed (no active process found)';
+              'Connection to ${connection.server} removed (window closed)';
         });
       }
     } catch (e) {
@@ -282,37 +224,40 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                 onRefreshAll: _refreshAllConnections,
                 onToggleAutoRefresh: _toggleAutoRefresh,
                 onRefreshSingle: _refreshSingleConnection,
-                onCheckStatus: (pid) async {
-                  final isAlive = await _rdpService.isProcessAlive(pid);
+                onCheckStatus: (windowId) async {
+                  final connection = _activeConnections.firstWhere((c) => c.windowId == windowId);
+                  final isAlive = await _rdpService.isWindowAlive(connection.windowId);
                   if (mounted) {
                     setState(() {
                       _connectionStatus = isAlive
-                          ? 'Process $pid is running'
-                          : 'Process $pid is not running';
+                          ? 'Window ID $windowId is active'
+                          : 'Window ID $windowId is not active';
                     });
                   }
                 },
-                onCheckRDPConnection: (pid) async {
+                onCheckRDPConnection: (windowId) async {
+                  final connection = _activeConnections.firstWhere((c) => c.windowId == windowId);
                   setState(() {
-                    _connectionStatus = 'Checking RDP connection for PID $pid...';
+                    _connectionStatus = 'Checking RDP connection for Window ID $windowId...';
                   });
-                  final isRDPConnected = await _rdpService.isRDPConnection(pid);
+                  final isRDPConnected = await _rdpService.isRDPConnection(connection.pid);
                   if (mounted) {
                     setState(() {
                       _connectionStatus = isRDPConnected
-                          ? 'PID $pid has active RDP connection'
-                          : 'PID $pid has no active RDP connection';
+                          ? 'Window ID $windowId has active RDP connection'
+                          : 'Window ID $windowId has no active RDP connection';
                     });
                   }
                 },
-                onGetProcessDetails: (pid) async {
+                onGetProcessDetails: (windowId) async {
+                  final connection = _activeConnections.firstWhere((c) => c.windowId == windowId);
                   setState(() {
-                    _connectionStatus = 'Getting process details for PID $pid...';
+                    _connectionStatus = 'Getting details for Window ID $windowId...';
                   });
-                  final details = await _rdpService.getProcessDetails(pid);
+                  final details = await _rdpService.getProcessDetails(connection.pid);
                   if (mounted) {
                     setState(() {
-                      _connectionStatus = 'Process $pid details:\n$details';
+                      _connectionStatus = 'Window ID $windowId details:\n$details';
                     });
                   }
                 },

@@ -102,7 +102,7 @@ class ConnectionList extends StatelessWidget {
               title: Text('${connection.server}:${connection.port}'),
               subtitle: Text(
                 'User: ${connection.username}\n'
-                'PID: ${connection.pid}\n'
+                'Window ID: ${connection.windowId} | PID: ${connection.pid}\n'
                 'Connected: ${connection.connectedAt.toString().substring(0, 19)}',
               ),
               trailing: PopupMenuButton(
@@ -127,7 +127,7 @@ class ConnectionList extends StatelessWidget {
                         Text('Check Process'),
                       ],
                     ),
-                    onTap: () => onCheckStatus(connection.pid),
+                    onTap: () => onCheckStatus(connection.windowId),
                   ),
                   PopupMenuItem(
                     value: 'rdp_check',
@@ -138,7 +138,7 @@ class ConnectionList extends StatelessWidget {
                         Text('Check RDP Connection'),
                       ],
                     ),
-                    onTap: () => onCheckRDPConnection(connection.pid),
+                    onTap: () => onCheckRDPConnection(connection.windowId),
                   ),
                   PopupMenuItem(
                     value: 'details',
@@ -149,7 +149,7 @@ class ConnectionList extends StatelessWidget {
                         Text('Process Details'),
                       ],
                     ),
-                    onTap: () => onGetProcessDetails(connection.pid),
+                    onTap: () => onGetProcessDetails(connection.windowId),
                   ),
                   PopupMenuItem(
                     value: 'kill',

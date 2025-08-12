@@ -4,8 +4,10 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/rdp_connection.dart';
+import 'window_manager_service.dart';
 
 class RDPService {
+  final WindowManagerService _windowManager = WindowManagerService();
   Future<String> createRdpFile({
     required String server,
     required String username,
@@ -91,9 +93,12 @@ kdcproxyname:s:''';
     try {
       onStatusUpdate('Creating RDP file...');
 
-      // 1. 실행 전 기존 PID 목록 저장
-      final existingPids = await getAllWindowsAppPids();
-      onStatusUpdate('Found ${existingPids.length} existing Windows App processes');
+      // 1. 실행 전 기존 Window 목록 저장
+      print('🔍 RDP: Getting existing windows...');
+      final existingWindows = await _windowManager.getWindowsAppWindows();
+      onStatusUpdate('Found ${existingWindows.length} existing Windows App windows');
+      final existingWindowIds = existingWindows.map((w) => w.windowId).toSet();
+      print('🔍 RDP: Existing window IDs: $existingWindowIds');
 
       // 2. RDP 파일 생성
       final rdpFilePath = await createRdpFile(
@@ -117,40 +122,33 @@ kdcproxyname:s:''';
         throw Exception('Failed to start Windows App: ${result.stderr}');
       }
 
-      // 4. 새로운 PID 찾기 (폴링 방식)
-      onStatusUpdate('Waiting for new process to start...');
-      onStatusUpdate('Existing PIDs: ${existingPids.join(", ")}');
-      int? newPid;
+      // 4. 새로운 Window 찾기 (폴링 방식)
+      onStatusUpdate('Waiting for new window to appear...');
+      WindowInfo? newWindow;
       
       for (int attempt = 1; attempt <= 10; attempt++) {
         await Future.delayed(const Duration(seconds: 3));
-        onStatusUpdate('Looking for new process (attempt $attempt/10)...');
+        onStatusUpdate('Looking for new window (attempt $attempt/10)...');
         
-        final currentPids = await getAllWindowsAppPids();
-        onStatusUpdate('Current PIDs: ${currentPids.join(", ")}');
+        final currentWindows = await _windowManager.getWindowsAppWindows();
+        onStatusUpdate('Found ${currentWindows.length} total windows');
+        print('🔍 RDP: Current window IDs: ${currentWindows.map((w) => w.windowId).toList()}');
         
-        final newPids = currentPids.where((pid) => !existingPids.contains(pid)).toList();
-        onStatusUpdate('New PIDs found: ${newPids.join(", ")}');
+        // 새로운 윈도우 찾기
+        final newWindows = currentWindows.where((w) => !existingWindowIds.contains(w.windowId)).toList();
+        print('🔍 RDP: New windows found: ${newWindows.map((w) => w.windowId).toList()}');
         
-        if (newPids.isNotEmpty) {
-          newPid = newPids.last; // 가장 최근 PID 사용
-          onStatusUpdate('Selected new process PID: $newPid');
+        if (newWindows.isNotEmpty) {
+          newWindow = newWindows.last; // 가장 최근 Window 사용
+          onStatusUpdate('Found new window: ID ${newWindow.windowId}, Name: "${newWindow.windowName}"');
           break;
         } else {
-          onStatusUpdate('No new PIDs found in attempt $attempt');
+          onStatusUpdate('No new windows found in attempt $attempt');
         }
       }
 
-      if (newPid == null) {
-        // 새 PID를 찾지 못한 경우, 기존 방식으로 폴백
-        onStatusUpdate('Could not find new process, using fallback method...');
-        final allPids = await getAllWindowsAppPids();
-        if (allPids.isNotEmpty) {
-          newPid = allPids.last;
-          onStatusUpdate('Using latest process PID: $newPid');
-        } else {
-          throw Exception('No Windows App process found');
-        }
+      if (newWindow == null) {
+        throw Exception('Could not find new RDP window after 10 attempts');
       }
 
       // 5. 연결 정보 생성
@@ -158,12 +156,13 @@ kdcproxyname:s:''';
         server: server,
         username: username,
         port: port,
-        pid: newPid,
+        windowId: newWindow.windowId,
+        pid: newWindow.ownerPID,
         rdpFilePath: rdpFilePath,
         connectedAt: DateTime.now(),
       );
 
-      onStatusUpdate('Windows App launched with PID: $newPid. Check connection status manually.');
+      onStatusUpdate('RDP window created! Window ID: ${newWindow.windowId}, PID: ${newWindow.ownerPID}');
 
       // 6. 임시 파일 정리 (연결 후 일정 시간 뒤)
       Future.delayed(const Duration(minutes: 1), () {
@@ -181,12 +180,22 @@ kdcproxyname:s:''';
   }
 
   Future<void> killConnection(RDPConnection connection) async {
-    final result = await Process.run('kill', [connection.pid.toString()]);
-    if (result.exitCode != 0) {
-      throw Exception('Failed to terminate connection: ${result.stderr}');
+    // Window ID로 창 닫기 시도
+    final windowClosed = await _windowManager.closeWindow(connection.windowId);
+    if (!windowClosed) {
+      // Window 닫기가 실패하면 프로세스 종료로 폴백 (전체 앱이 종료될 수 있음)
+      final result = await Process.run('kill', [connection.pid.toString()]);
+      if (result.exitCode != 0) {
+        throw Exception('Failed to terminate connection: ${result.stderr}');
+      }
     }
   }
 
+  Future<bool> isWindowAlive(int windowId) async {
+    return await _windowManager.isWindowAlive(windowId);
+  }
+
+  // 기존 PID 기반 메서드도 유지 (호환성)
   Future<bool> isProcessAlive(int pid) async {
     try {
       final result = await Process.run('ps', ['-p', pid.toString()]);
