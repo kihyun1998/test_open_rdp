@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import UniformTypeIdentifiers
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -24,6 +25,13 @@ class AppDelegate: FlutterAppDelegate {
         if let args = call.arguments as? [String: Any],
            let windowId = args["windowId"] as? Int {
           self?.closeWindow(windowId: windowId, result: result)
+        } else {
+          result(FlutterError(code: "INVALID_ARGS", message: "Invalid arguments", details: nil))
+        }
+      case "captureWindow":
+        if let args = call.arguments as? [String: Any],
+           let windowId = args["windowId"] as? Int {
+          self?.captureWindow(windowId: windowId, result: result)
         } else {
           result(FlutterError(code: "INVALID_ARGS", message: "Invalid arguments", details: nil))
         }
@@ -92,6 +100,41 @@ class AppDelegate: FlutterAppDelegate {
         }
     } else {
         result(false)
+    }
+  }
+  
+  private func captureWindow(windowId: Int, result: @escaping FlutterResult) {
+    print("📷 Capturing window: \(windowId)")
+    
+    let windowID = CGWindowID(windowId)
+    
+    guard let image = CGWindowListCreateImage(
+      CGRect.null,
+      .optionIncludingWindow,
+      windowID,
+      .bestResolution
+    ) else {
+      print("📷 Failed to create image for window \(windowId)")
+      result(nil)
+      return
+    }
+    
+    guard let pngData = CFDataCreateMutable(nil, 0),
+          let destination = CGImageDestinationCreateWithData(pngData, kUTTypePNG, 1, nil) else {
+      print("📷 Failed to create PNG data")
+      result(nil)
+      return
+    }
+    
+    CGImageDestinationAddImage(destination, image, nil)
+    
+    if CGImageDestinationFinalize(destination) {
+      let data = Data(referencing: pngData)
+      print("📷 Captured \(data.count) bytes")
+      result(FlutterStandardTypedData(bytes: data))
+    } else {
+      print("📷 Failed to finalize PNG")
+      result(nil)
     }
   }
 }

@@ -4,11 +4,13 @@ import '../services/window_manager_service.dart';
 class PidWindowsList extends StatefulWidget {
   final int pid;
   final Function(int) onCloseWindow;
+  final Function(int) onCaptureWindow;
 
   const PidWindowsList({
     super.key,
     required this.pid,
     required this.onCloseWindow,
+    required this.onCaptureWindow,
   });
 
   @override
@@ -249,6 +251,11 @@ class _PidWindowsListState extends State<PidWindowsList> {
               ),
             const SizedBox(width: 8),
             IconButton(
+              icon: const Icon(Icons.camera_alt, color: Colors.green),
+              onPressed: () => _captureWindow(window.windowId),
+              tooltip: '창 캡처',
+            ),
+            IconButton(
               icon: const Icon(Icons.close, color: Colors.red),
               onPressed: () => _closeWindow(window.windowId),
               tooltip: '이 창 닫기',
@@ -269,6 +276,11 @@ class _PidWindowsListState extends State<PidWindowsList> {
         _refreshWindows();
       }
     });
+  }
+
+  Future<void> _captureWindow(int windowId) async {
+    print('📷 Capturing window ID: $windowId');
+    widget.onCaptureWindow(windowId);
   }
 
   bool _isNewWindow(int windowId) {

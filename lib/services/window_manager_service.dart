@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 
 class WindowInfo {
@@ -75,5 +76,18 @@ class WindowManagerService {
   Future<bool> isWindowAlive(int windowId) async {
     final windows = await getWindowsAppWindows();
     return windows.any((window) => window.windowId == windowId);
+  }
+
+  /// 특정 Window ID의 스크린샷을 캡처합니다
+  Future<Uint8List?> captureWindow(int windowId) async {
+    try {
+      print('📷 Capturing window ID: $windowId');
+      final Uint8List? result = await _channel.invokeMethod('captureWindow', {'windowId': windowId});
+      print('📷 Capture result: ${result?.length ?? 0} bytes');
+      return result;
+    } catch (e) {
+      print('❌ Error capturing window $windowId: $e');
+      return null;
+    }
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -9,6 +10,18 @@ import 'widgets/connection_form.dart';
 import 'widgets/connection_list.dart';
 import 'widgets/pid_windows_list.dart';
 import 'widgets/status_message.dart';
+
+class CapturedImage {
+  final int windowId;
+  final Uint8List imageData;
+  final DateTime capturedAt;
+
+  CapturedImage({
+    required this.windowId,
+    required this.imageData,
+    required this.capturedAt,
+  });
+}
 
 void main() {
   runApp(const RDPApp());
@@ -49,6 +62,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   String _connectionStatus = '';
   List<RDPConnection> _activeConnections = [];
   Timer? _autoRefreshTimer;
+  List<CapturedImage> _capturedImages = [];
 
   @override
   void dispose() {
@@ -240,6 +254,38 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     }
   }
 
+  Future<void> _captureWindowById(int windowId) async {
+    print('📷 Main: Capturing window ID: $windowId');
+    setState(() {
+      _connectionStatus = 'Capturing window ID: $windowId...';
+    });
+
+    try {
+      final imageData = await _windowManager.captureWindow(windowId);
+      if (imageData != null && imageData.isNotEmpty) {
+        final capturedImage = CapturedImage(
+          windowId: windowId,
+          imageData: imageData,
+          capturedAt: DateTime.now(),
+        );
+        
+        setState(() {
+          _capturedImages.add(capturedImage);
+          _connectionStatus = 'Window ID $windowId captured successfully';
+        });
+      } else {
+        setState(() {
+          _connectionStatus = 'Failed to capture window ID $windowId';
+        });
+      }
+    } catch (e) {
+      print('❌ Main: Error capturing window: $e');
+      setState(() {
+        _connectionStatus = 'Error capturing window: $e';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -336,8 +382,68 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                     (pid) => PidWindowsList(
                       pid: pid,
                       onCloseWindow: _closeWindowById,
+                      onCaptureWindow: _captureWindowById,
                     ),
                   )),
+              if (_capturedImages.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '캡처된 이미지 (${_capturedImages.length}개)',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 200,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _capturedImages.length,
+                            itemBuilder: (context, index) {
+                              final image = _capturedImages[index];
+                              return Container(
+                                margin: const EdgeInsets.only(right: 8),
+                                child: Column(
+                                  children: [
+                                    Expanded(
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.memory(
+                                          image.imageData,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Window ${image.windowId}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    Text(
+                                      '${image.capturedAt.hour}:${image.capturedAt.minute.toString().padLeft(2, '0')}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ],
           ],
         ),
