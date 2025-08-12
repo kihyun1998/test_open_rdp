@@ -7,6 +7,8 @@ import 'services/rdp_service.dart';
 import 'widgets/connection_form.dart';
 import 'widgets/connection_list.dart';
 import 'widgets/status_message.dart';
+import 'widgets/pid_windows_list.dart';
+import 'services/window_manager_service.dart';
 
 void main() {
   runApp(const RDPApp());
@@ -39,6 +41,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   final _passwordController = TextEditingController();
   final _portController = TextEditingController(text: '3389');
   final _rdpService = RDPService();
+  final _windowManager = WindowManagerService();
 
   bool _isConnecting = false;
   bool _isRefreshing = false;
@@ -191,6 +194,31 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     }
   }
 
+  Future<void> _closeWindowById(int windowId) async {
+    setState(() {
+      _connectionStatus = 'Closing window ID: $windowId...';
+    });
+
+    try {
+      final success = await _windowManager.closeWindow(windowId);
+      if (success) {
+        setState(() {
+          _connectionStatus = 'Window ID $windowId closed successfully';
+        });
+        // 연결 목록 새로고침
+        await _refreshAllConnections();
+      } else {
+        setState(() {
+          _connectionStatus = 'Failed to close window ID $windowId';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _connectionStatus = 'Error closing window: $e';
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -216,7 +244,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
             if (_connectionStatus.isNotEmpty)
               StatusMessage(message: _connectionStatus),
             const SizedBox(height: 16),
-            if (_activeConnections.isNotEmpty)
+            if (_activeConnections.isNotEmpty) ...[
               ConnectionList(
                 connections: _activeConnections,
                 isRefreshing: _isRefreshing,
@@ -263,6 +291,15 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                 },
                 onKillConnection: _killConnection,
               ),
+              const SizedBox(height: 16),
+              // PID의 모든 창들 표시
+              ...(_activeConnections.map((connection) => connection.pid).toSet().map((pid) =>
+                PidWindowsList(
+                  pid: pid,
+                  onCloseWindow: _closeWindowById,
+                )
+              )),
+            ],
           ],
         ),
       ),

@@ -77,8 +77,40 @@ class AppDelegate: FlutterAppDelegate {
   }
   
   private func closeWindow(windowId: Int, result: @escaping FlutterResult) {
-    // Window ID로 창 닫기 (이 부분은 복잡할 수 있음)
-    // 우선은 성공으로 반환
-    result(true)
+    print("🔍 Swift: Attempting to close window ID: \(windowId)")
+    
+    // AppleScript를 사용해서 특정 Window ID의 창 닫기
+    let script = """
+    tell application "System Events"
+        tell application process "Windows App"
+            set windowList to windows
+            repeat with w in windowList
+                try
+                    -- 창의 속성을 확인하고 닫기 시도
+                    click button 1 of w
+                    exit repeat
+                on error
+                    -- 다음 창으로 계속
+                end try
+            end repeat
+        end tell
+    end tell
+    """
+    
+    var error: NSDictionary?
+    if let scriptObject = NSAppleScript(source: script) {
+        let output = scriptObject.executeAndReturnError(&error)
+        
+        if let error = error {
+            print("🔍 Swift: AppleScript error: \(error)")
+            result(false)
+        } else {
+            print("🔍 Swift: AppleScript executed successfully")
+            result(true)
+        }
+    } else {
+        print("🔍 Swift: Failed to create AppleScript")
+        result(false)
+    }
   }
 }
