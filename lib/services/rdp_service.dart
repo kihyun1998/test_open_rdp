@@ -139,8 +139,13 @@ kdcproxyname:s:''';
         print('🔍 RDP: New windows found: ${newWindows.map((w) => w.windowId).toList()}');
         
         if (newWindows.isNotEmpty) {
-          newWindow = newWindows.last; // 가장 최근 Window 사용
-          onStatusUpdate('Found new window: ID ${newWindow.windowId}, Name: "${newWindow.windowName}"');
+          // 가장 큰 창을 RDP 메인 창으로 선택 (면적 기준)
+          newWindow = newWindows.reduce((a, b) {
+            final areaA = a.width * a.height;
+            final areaB = b.width * b.height;
+            return areaA > areaB ? a : b;
+          });
+          onStatusUpdate('Found new RDP window: ID ${newWindow.windowId}, Size: ${newWindow.width.toInt()}x${newWindow.height.toInt()}');
           break;
         } else {
           onStatusUpdate('No new windows found in attempt $attempt');

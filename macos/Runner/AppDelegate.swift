@@ -43,13 +43,16 @@ class AppDelegate: FlutterAppDelegate {
     
     for window in windowList {
       let ownerName = window[kCGWindowOwnerName as String] as? String ?? "Unknown"
-      print("🔍 Swift: Window owner: '\(ownerName)'")
+      let windowName = window[kCGWindowName as String] as? String ?? ""
+      let windowId = window[kCGWindowNumber as String] as? Int ?? 0
       
-      if ownerName == "Windows App" {
-        print("🔍 Swift: Found Windows App window!")
+      // 모든 윈도우 정보 출력 (디버깅용)
+      print("🔍 Swift: Owner: '\(ownerName)', Name: '\(windowName)', ID: \(windowId)")
+      
+      // Windows App 관련 윈도우들을 더 넓게 찾기
+      if ownerName.contains("Windows") || ownerName == "Windows App" {
+        print("🔍 Swift: Found Windows-related window!")
         
-        let windowId = window[kCGWindowNumber as String] as? Int ?? 0
-        let windowName = window[kCGWindowName as String] as? String ?? ""
         let ownerPID = window[kCGWindowOwnerPID as String] as? Int ?? 0
         
         print("🔍 Swift: Window ID: \(windowId), Name: '\(windowName)', PID: \(ownerPID)")

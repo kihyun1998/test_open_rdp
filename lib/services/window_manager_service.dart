@@ -17,7 +17,9 @@ class WindowInfo {
   });
 
   factory WindowInfo.fromMap(Map<String, dynamic> map) {
-    final bounds = map['bounds'] as Map<String, dynamic>;
+    final boundsRaw = map['bounds'];
+    final bounds = Map<String, dynamic>.from(boundsRaw as Map);
+    
     return WindowInfo(
       windowId: map['windowId'] as int,
       windowName: map['windowName'] as String,
@@ -47,7 +49,9 @@ class WindowManagerService {
       
       final windows = result.map((window) {
         print('🔍 Flutter: Window data: $window');
-        return WindowInfo.fromMap(window as Map<String, dynamic>);
+        // 안전한 타입 변환
+        final windowMap = Map<String, dynamic>.from(window as Map);
+        return WindowInfo.fromMap(windowMap);
       }).toList();
       
       print('🔍 Flutter: Parsed ${windows.length} WindowInfo objects');
