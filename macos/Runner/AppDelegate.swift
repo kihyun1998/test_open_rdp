@@ -108,8 +108,71 @@ class AppDelegate: FlutterAppDelegate {
     
     let windowID = CGWindowID(windowId)
     
+    // 창 정보를 가져와서 분석
+    let windowList = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as! [[String: Any]]
+    
+    guard let windowInfo = windowList.first,
+          let bounds = windowInfo[kCGWindowBounds as String] as? [String: Any],
+          let x = bounds["X"] as? Double,
+          let y = bounds["Y"] as? Double,
+          let width = bounds["Width"] as? Double,
+          let height = bounds["Height"] as? Double else {
+      print("📷 Failed to get window bounds")
+      result(nil)
+      return
+    }
+    
+    // 창 속성 분석
+    let windowName = windowInfo[kCGWindowName as String] as? String ?? ""
+    let windowLayer = windowInfo[kCGWindowLayer as String] as? Int ?? 0
+    let ownerName = windowInfo[kCGWindowOwnerName as String] as? String ?? ""
+    
+    print("📷 Window info - Name: '\(windowName)', Layer: \(windowLayer), Owner: '\(ownerName)'")
+    
+    // titlebar 높이 동적 계산
+    var titlebarHeight: Double = 0
+    
+    // 1. 전체화면 감지 (화면 크기와 비교)
+    let screenFrame = NSScreen.main?.frame ?? NSRect.zero
+    let isFullscreen = (width >= screenFrame.width - 10 && height >= screenFrame.height - 10)
+    
+    // 2. 창 레이어 확인 (0이면 일반 창, 다른 값이면 특수 창)
+    let isNormalWindow = (windowLayer == 0)
+    
+    // 3. 창 이름으로 특수 창 감지
+    let isSpecialWindow = windowName.isEmpty || 
+                         windowName.contains("Dock") || 
+                         windowName.contains("Desktop") ||
+                         windowName.contains("Wallpaper")
+    
+    if isFullscreen {
+      titlebarHeight = 0
+      print("📷 Detected fullscreen window - no titlebar")
+    } else if !isNormalWindow || isSpecialWindow {
+      titlebarHeight = 0
+      print("📷 Detected special window - no titlebar")
+    } else {
+      // 일반 창인 경우 titlebar 높이 계산
+      // macOS Big Sur 이후: 28px, 이전: 22px
+      if #available(macOS 11.0, *) {
+        titlebarHeight = 28
+      } else {
+        titlebarHeight = 22
+      }
+      print("📷 Detected normal window - titlebar height: \(titlebarHeight)")
+    }
+    
+    let contentRect = CGRect(
+      x: x,
+      y: y + titlebarHeight,
+      width: width,
+      height: max(0, height - titlebarHeight)
+    )
+    
+    print("📷 Capture rect: \(contentRect)")
+    
     guard let image = CGWindowListCreateImage(
-      CGRect.null,
+      contentRect,
       .optionIncludingWindow,
       windowID,
       .bestResolution
@@ -130,7 +193,7 @@ class AppDelegate: FlutterAppDelegate {
     
     if CGImageDestinationFinalize(destination) {
       let data = Data(referencing: pngData)
-      print("📷 Captured \(data.count) bytes")
+      print("📷 Captured \(data.count) bytes (titlebar: \(titlebarHeight)px)")
       result(FlutterStandardTypedData(bytes: data))
     } else {
       print("📷 Failed to finalize PNG")
