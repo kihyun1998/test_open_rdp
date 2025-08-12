@@ -292,6 +292,30 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                     });
                   }
                 },
+                onCheckRDPConnection: (pid) async {
+                  setState(() {
+                    _connectionStatus = 'Checking RDP connection for PID $pid...';
+                  });
+                  final isRDPConnected = await _rdpService.isRDPConnection(pid);
+                  if (mounted) {
+                    setState(() {
+                      _connectionStatus = isRDPConnected
+                          ? 'PID $pid has active RDP connection'
+                          : 'PID $pid has no active RDP connection';
+                    });
+                  }
+                },
+                onGetProcessDetails: (pid) async {
+                  setState(() {
+                    _connectionStatus = 'Getting process details for PID $pid...';
+                  });
+                  final details = await _rdpService.getProcessDetails(pid);
+                  if (mounted) {
+                    setState(() {
+                      _connectionStatus = 'Process $pid details:\n$details';
+                    });
+                  }
+                },
                 onKillConnection: _killConnection,
               ),
           ],

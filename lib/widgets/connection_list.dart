@@ -9,6 +9,8 @@ class ConnectionList extends StatelessWidget {
   final VoidCallback onToggleAutoRefresh;
   final Function(int) onRefreshSingle;
   final Function(int) onCheckStatus;
+  final Function(int) onCheckRDPConnection;
+  final Function(int) onGetProcessDetails;
   final Function(RDPConnection) onKillConnection;
 
   const ConnectionList({
@@ -20,6 +22,8 @@ class ConnectionList extends StatelessWidget {
     required this.onToggleAutoRefresh,
     required this.onRefreshSingle,
     required this.onCheckStatus,
+    required this.onCheckRDPConnection,
+    required this.onGetProcessDetails,
     required this.onKillConnection,
   });
 
@@ -120,10 +124,32 @@ class ConnectionList extends StatelessWidget {
                       children: [
                         Icon(Icons.info),
                         SizedBox(width: 8),
-                        Text('Check Status'),
+                        Text('Check Process'),
                       ],
                     ),
                     onTap: () => onCheckStatus(connection.pid),
+                  ),
+                  PopupMenuItem(
+                    value: 'rdp_check',
+                    child: const Row(
+                      children: [
+                        Icon(Icons.network_check, color: Colors.green),
+                        SizedBox(width: 8),
+                        Text('Check RDP Connection'),
+                      ],
+                    ),
+                    onTap: () => onCheckRDPConnection(connection.pid),
+                  ),
+                  PopupMenuItem(
+                    value: 'details',
+                    child: const Row(
+                      children: [
+                        Icon(Icons.description, color: Colors.orange),
+                        SizedBox(width: 8),
+                        Text('Process Details'),
+                      ],
+                    ),
+                    onTap: () => onGetProcessDetails(connection.pid),
                   ),
                   PopupMenuItem(
                     value: 'kill',
