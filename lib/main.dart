@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 
 import 'models/rdp_connection.dart';
 import 'services/rdp_service.dart';
+import 'services/window_manager_service.dart';
 import 'widgets/connection_form.dart';
 import 'widgets/connection_list.dart';
-import 'widgets/status_message.dart';
 import 'widgets/pid_windows_list.dart';
-import 'services/window_manager_service.dart';
+import 'widgets/status_message.dart';
 
 void main() {
   runApp(const RDPApp());
@@ -36,8 +36,8 @@ class RDPConnectionPage extends StatefulWidget {
 
 class _RDPConnectionPageState extends State<RDPConnectionPage> {
   final _formKey = GlobalKey<FormState>();
-  final _serverController = TextEditingController();
-  final _usernameController = TextEditingController();
+  final _serverController = TextEditingController(text: "192.168.136.32");
+  final _usernameController = TextEditingController(text: "Administrator");
   final _passwordController = TextEditingController();
   final _portController = TextEditingController(text: '3389');
   final _rdpService = RDPService();
@@ -163,7 +163,6 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     }
   }
 
-
   Future<void> _refreshSingleConnection(int index) async {
     if (index >= _activeConnections.length) return;
 
@@ -195,24 +194,46 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   }
 
   Future<void> _closeWindowById(int windowId) async {
+    print('🔄 Main: Attempting to close window ID: $windowId');
     setState(() {
       _connectionStatus = 'Closing window ID: $windowId...';
     });
 
     try {
+      // 닫기 전 윈도우가 존재하는지 확인
+      final isAlive = await _windowManager.isWindowAlive(windowId);
+      print('🔄 Main: Window $windowId is alive before close: $isAlive');
+
       final success = await _windowManager.closeWindow(windowId);
+      print('🔄 Main: Close operation result: $success');
+
       if (success) {
         setState(() {
-          _connectionStatus = 'Window ID $windowId closed successfully';
+          _connectionStatus =
+              'Window ID $windowId close command sent successfully';
         });
+
+        // 창이 실제로 닫혔는지 확인
+        await Future.delayed(const Duration(seconds: 2));
+        final isStillAlive = await _windowManager.isWindowAlive(windowId);
+        print('🔄 Main: Window $windowId is alive after close: $isStillAlive');
+
+        setState(() {
+          _connectionStatus = isStillAlive
+              ? 'Window ID $windowId may still be open (check manually)'
+              : 'Window ID $windowId successfully closed';
+        });
+
         // 연결 목록 새로고침
         await _refreshAllConnections();
       } else {
         setState(() {
-          _connectionStatus = 'Failed to close window ID $windowId';
+          _connectionStatus =
+              'Failed to close window ID $windowId - command returned false';
         });
       }
     } catch (e) {
+      print('❌ Main: Error closing window: $e');
       setState(() {
         _connectionStatus = 'Error closing window: $e';
       });
@@ -253,8 +274,12 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                 onToggleAutoRefresh: _toggleAutoRefresh,
                 onRefreshSingle: _refreshSingleConnection,
                 onCheckStatus: (windowId) async {
-                  final connection = _activeConnections.firstWhere((c) => c.windowId == windowId);
-                  final isAlive = await _rdpService.isWindowAlive(connection.windowId);
+                  final connection = _activeConnections.firstWhere(
+                    (c) => c.windowId == windowId,
+                  );
+                  final isAlive = await _rdpService.isWindowAlive(
+                    connection.windowId,
+                  );
                   if (mounted) {
                     setState(() {
                       _connectionStatus = isAlive
@@ -264,11 +289,16 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                   }
                 },
                 onCheckRDPConnection: (windowId) async {
-                  final connection = _activeConnections.firstWhere((c) => c.windowId == windowId);
+                  final connection = _activeConnections.firstWhere(
+                    (c) => c.windowId == windowId,
+                  );
                   setState(() {
-                    _connectionStatus = 'Checking RDP connection for Window ID $windowId...';
+                    _connectionStatus =
+                        'Checking RDP connection for Window ID $windowId...';
                   });
-                  final isRDPConnected = await _rdpService.isRDPConnection(connection.pid);
+                  final isRDPConnected = await _rdpService.isRDPConnection(
+                    connection.pid,
+                  );
                   if (mounted) {
                     setState(() {
                       _connectionStatus = isRDPConnected
@@ -278,14 +308,20 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                   }
                 },
                 onGetProcessDetails: (windowId) async {
-                  final connection = _activeConnections.firstWhere((c) => c.windowId == windowId);
+                  final connection = _activeConnections.firstWhere(
+                    (c) => c.windowId == windowId,
+                  );
                   setState(() {
-                    _connectionStatus = 'Getting details for Window ID $windowId...';
+                    _connectionStatus =
+                        'Getting details for Window ID $windowId...';
                   });
-                  final details = await _rdpService.getProcessDetails(connection.pid);
+                  final details = await _rdpService.getProcessDetails(
+                    connection.pid,
+                  );
                   if (mounted) {
                     setState(() {
-                      _connectionStatus = 'Window ID $windowId details:\n$details';
+                      _connectionStatus =
+                          'Window ID $windowId details:\n$details';
                     });
                   }
                 },
@@ -293,12 +329,15 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
               ),
               const SizedBox(height: 16),
               // PID의 모든 창들 표시
-              ...(_activeConnections.map((connection) => connection.pid).toSet().map((pid) =>
-                PidWindowsList(
-                  pid: pid,
-                  onCloseWindow: _closeWindowById,
-                )
-              )),
+              ...(_activeConnections
+                  .map((connection) => connection.pid)
+                  .toSet()
+                  .map(
+                    (pid) => PidWindowsList(
+                      pid: pid,
+                      onCloseWindow: _closeWindowById,
+                    ),
+                  )),
             ],
           ],
         ),

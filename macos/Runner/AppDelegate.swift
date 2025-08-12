@@ -34,11 +34,7 @@ class AppDelegate: FlutterAppDelegate {
   }
   
   private func getWindowsAppWindows(result: @escaping FlutterResult) {
-    print("🔍 Swift: getWindowsAppWindows called")
-    
     let windowList = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as! [[String: Any]]
-    print("🔍 Swift: Found \(windowList.count) total windows")
-    
     var windowsAppWindows: [[String: Any]] = []
     
     for window in windowList {
@@ -46,16 +42,9 @@ class AppDelegate: FlutterAppDelegate {
       let windowName = window[kCGWindowName as String] as? String ?? ""
       let windowId = window[kCGWindowNumber as String] as? Int ?? 0
       
-      // 모든 윈도우 정보 출력 (디버깅용)
-      print("🔍 Swift: Owner: '\(ownerName)', Name: '\(windowName)', ID: \(windowId)")
-      
       // Windows App 관련 윈도우들을 더 넓게 찾기
       if ownerName.contains("Windows") || ownerName == "Windows App" {
-        print("🔍 Swift: Found Windows-related window!")
-        
         let ownerPID = window[kCGWindowOwnerPID as String] as? Int ?? 0
-        
-        print("🔍 Swift: Window ID: \(windowId), Name: '\(windowName)', PID: \(ownerPID)")
         
         let windowInfo: [String: Any] = [
           "windowId": windowId,
@@ -72,27 +61,20 @@ class AppDelegate: FlutterAppDelegate {
       }
     }
     
-    print("🔍 Swift: Returning \(windowsAppWindows.count) Windows App windows")
     result(windowsAppWindows)
   }
   
   private func closeWindow(windowId: Int, result: @escaping FlutterResult) {
-    print("🔍 Swift: Attempting to close window ID: \(windowId)")
+    print("🔥 Closing window: \(windowId)")
     
-    // AppleScript를 사용해서 특정 Window ID의 창 닫기
     let script = """
+    tell application "Windows App"
+        activate
+    end tell
+    delay 0.2
     tell application "System Events"
-        tell application process "Windows App"
-            set windowList to windows
-            repeat with w in windowList
-                try
-                    -- 창의 속성을 확인하고 닫기 시도
-                    click button 1 of w
-                    exit repeat
-                on error
-                    -- 다음 창으로 계속
-                end try
-            end repeat
+        tell process "Windows App"
+            click button 1 of front window
         end tell
     end tell
     """
@@ -101,15 +83,14 @@ class AppDelegate: FlutterAppDelegate {
     if let scriptObject = NSAppleScript(source: script) {
         let output = scriptObject.executeAndReturnError(&error)
         
-        if let error = error {
-            print("🔍 Swift: AppleScript error: \(error)")
-            result(false)
-        } else {
-            print("🔍 Swift: AppleScript executed successfully")
+        if error == nil {
+            print("🔥 Success")
             result(true)
+        } else {
+            print("🔥 Failed: \(error!)")
+            result(false)
         }
     } else {
-        print("🔍 Swift: Failed to create AppleScript")
         result(false)
     }
   }

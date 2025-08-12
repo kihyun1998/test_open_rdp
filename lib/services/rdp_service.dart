@@ -94,11 +94,9 @@ kdcproxyname:s:''';
       onStatusUpdate('Creating RDP file...');
 
       // 1. 실행 전 기존 Window 목록 저장
-      print('🔍 RDP: Getting existing windows...');
       final existingWindows = await _windowManager.getWindowsAppWindows();
       onStatusUpdate('Found ${existingWindows.length} existing Windows App windows');
       final existingWindowIds = existingWindows.map((w) => w.windowId).toSet();
-      print('🔍 RDP: Existing window IDs: $existingWindowIds');
 
       // 2. RDP 파일 생성
       final rdpFilePath = await createRdpFile(
@@ -132,11 +130,9 @@ kdcproxyname:s:''';
         
         final currentWindows = await _windowManager.getWindowsAppWindows();
         onStatusUpdate('Found ${currentWindows.length} total windows');
-        print('🔍 RDP: Current window IDs: ${currentWindows.map((w) => w.windowId).toList()}');
         
         // 새로운 윈도우 찾기
         final newWindows = currentWindows.where((w) => !existingWindowIds.contains(w.windowId)).toList();
-        print('🔍 RDP: New windows found: ${newWindows.map((w) => w.windowId).toList()}');
         
         if (newWindows.isNotEmpty) {
           // 가장 큰 창을 RDP 메인 창으로 선택 (면적 기준)
@@ -204,13 +200,8 @@ kdcproxyname:s:''';
   Future<bool> isProcessAlive(int pid) async {
     try {
       final result = await Process.run('ps', ['-p', pid.toString()]);
-      print('ps -p $pid exit code: ${result.exitCode}');
-      if (result.exitCode != 0) {
-        print('ps -p $pid stderr: "${result.stderr}"');
-      }
       return result.exitCode == 0;
     } catch (e) {
-      print('Error checking if process $pid is alive: $e');
       return false;
     }
   }
