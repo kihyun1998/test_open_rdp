@@ -118,7 +118,7 @@ kdcproxyname:s:''';
 
       // 3. Windows App 실행 (새 인스턴스 강제 실행)
       final result = await Process.run('open', [
-        '-n', // 새 인스턴스 강제 실행
+        // '-n', // 새 인스턴스 강제 실행
         '-a',
         'Windows App',
         rdpFilePath,
