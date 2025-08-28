@@ -25,34 +25,58 @@ class WindowManagerResult<T> {
 class WindowInfo {
   final int windowId;
   final String windowName;
+  final String ownerName;
   final int ownerPID;
   final double x, y, width, height;
+  final int layer;
+  final bool isOnScreen;
+  final int storeType;
+  final int sharingState;
+  final double alpha;
+  final int memoryUsage;
+  final bool isInVideoMemory;
 
   WindowInfo({
     required this.windowId,
     required this.windowName,
+    required this.ownerName,
     required this.ownerPID,
     required this.x,
     required this.y,
     required this.width,
     required this.height,
+    required this.layer,
+    required this.isOnScreen,
+    required this.storeType,
+    required this.sharingState,
+    required this.alpha,
+    required this.memoryUsage,
+    required this.isInVideoMemory,
   });
 
   factory WindowInfo.fromMacosWindowInfo(MacosWindowInfo macosWindow) {
     return WindowInfo(
       windowId: macosWindow.windowId,
       windowName: macosWindow.name,
+      ownerName: macosWindow.ownerName,
       ownerPID: macosWindow.processId,
       x: macosWindow.x,
       y: macosWindow.y,
       width: macosWindow.width,
       height: macosWindow.height,
+      layer: macosWindow.layer,
+      isOnScreen: macosWindow.isOnScreen,
+      storeType: macosWindow.storeType ?? 0,
+      sharingState: macosWindow.sharingState ?? 0,
+      alpha: macosWindow.alpha ?? 1.0,
+      memoryUsage: macosWindow.memoryUsage ?? 0,
+      isInVideoMemory: macosWindow.isInVideoMemory ?? false,
     );
   }
 
   @override
   String toString() {
-    return 'WindowInfo(id: $windowId, name: "$windowName", pid: $ownerPID, bounds: ${width}x$height)';
+    return 'WindowInfo(id: $windowId, name: "$windowName", owner: "$ownerName", pid: $ownerPID, bounds: ${width}x$height, layer: $layer, visible: $isOnScreen)';
   }
 }
 
