@@ -94,8 +94,16 @@ kdcproxyname:s:''';
       onStatusUpdate('Creating RDP file...');
 
       // 1. 실행 전 기존 Window 목록 저장
-      final existingWindows = await _windowManager.getWindowsAppWindows();
-      onStatusUpdate('Found ${existingWindows.length} existing Windows App windows');
+      final existingWindowsResult = await _windowManager.getWindowsAppWindows();
+      if (!existingWindowsResult.isSuccess) {
+        throw Exception(
+          'Failed to get existing windows: ${existingWindowsResult.error}',
+        );
+      }
+      final existingWindows = existingWindowsResult.data ?? [];
+      onStatusUpdate(
+        'Found ${existingWindows.length} existing Windows App windows',
+      );
       final existingWindowIds = existingWindows.map((w) => w.windowId).toSet();
 
       // 2. RDP 파일 생성
@@ -110,7 +118,7 @@ kdcproxyname:s:''';
 
       // 3. Windows App 실행 (새 인스턴스 강제 실행)
       final result = await Process.run('open', [
-        '-n',  // 새 인스턴스 강제 실행
+        '-n', // 새 인스턴스 강제 실행
         '-a',
         'Windows App',
         rdpFilePath,
@@ -123,17 +131,27 @@ kdcproxyname:s:''';
       // 4. 새로운 Window 찾기 (폴링 방식)
       onStatusUpdate('Waiting for new window to appear...');
       WindowInfo? newWindow;
-      
+
       for (int attempt = 1; attempt <= 10; attempt++) {
         await Future.delayed(const Duration(seconds: 3));
         onStatusUpdate('Looking for new window (attempt $attempt/10)...');
-        
-        final currentWindows = await _windowManager.getWindowsAppWindows();
+
+        final currentWindowsResult = await _windowManager
+            .getWindowsAppWindows();
+        if (!currentWindowsResult.isSuccess) {
+          onStatusUpdate(
+            'Failed to get current windows: ${currentWindowsResult.error}',
+          );
+          continue;
+        }
+        final currentWindows = currentWindowsResult.data ?? [];
         onStatusUpdate('Found ${currentWindows.length} total windows');
-        
+
         // 새로운 윈도우 찾기
-        final newWindows = currentWindows.where((w) => !existingWindowIds.contains(w.windowId)).toList();
-        
+        final newWindows = currentWindows
+            .where((w) => !existingWindowIds.contains(w.windowId))
+            .toList();
+
         if (newWindows.isNotEmpty) {
           // 가장 큰 창을 RDP 메인 창으로 선택 (면적 기준)
           newWindow = newWindows.reduce((a, b) {
@@ -141,7 +159,9 @@ kdcproxyname:s:''';
             final areaB = b.width * b.height;
             return areaA > areaB ? a : b;
           });
-          onStatusUpdate('Found new RDP window: ID ${newWindow.windowId}, Size: ${newWindow.width.toInt()}x${newWindow.height.toInt()}');
+          onStatusUpdate(
+            'Found new RDP window: ID ${newWindow.windowId}, Size: ${newWindow.width.toInt()}x${newWindow.height.toInt()}',
+          );
           break;
         } else {
           onStatusUpdate('No new windows found in attempt $attempt');
@@ -163,7 +183,9 @@ kdcproxyname:s:''';
         connectedAt: DateTime.now(),
       );
 
-      onStatusUpdate('RDP window created! Window ID: ${newWindow.windowId}, PID: ${newWindow.ownerPID}');
+      onStatusUpdate(
+        'RDP window created! Window ID: ${newWindow.windowId}, PID: ${newWindow.ownerPID}',
+      );
 
       // 6. 임시 파일 정리 (연결 후 일정 시간 뒤)
       Future.delayed(const Duration(minutes: 1), () {
@@ -182,8 +204,10 @@ kdcproxyname:s:''';
 
   Future<void> killConnection(RDPConnection connection) async {
     // Window ID로 창 닫기 시도
-    final windowClosed = await _windowManager.closeWindow(connection.windowId);
-    if (!windowClosed) {
+    final windowClosedResult = await _windowManager.closeWindow(
+      connection.windowId,
+    );
+    if (!windowClosedResult.isSuccess || windowClosedResult.data != true) {
       // Window 닫기가 실패하면 프로세스 종료로 폴백 (전체 앱이 종료될 수 있음)
       final result = await Process.run('kill', [connection.pid.toString()]);
       if (result.exitCode != 0) {
@@ -193,7 +217,8 @@ kdcproxyname:s:''';
   }
 
   Future<bool> isWindowAlive(int windowId) async {
-    return await _windowManager.isWindowAlive(windowId);
+    final result = await _windowManager.isWindowAlive(windowId);
+    return result.isSuccess && (result.data ?? false);
   }
 
   // 기존 PID 기반 메서드도 유지 (호환성)
@@ -209,12 +234,10 @@ kdcproxyname:s:''';
   Future<List<int>> getAllWindowsAppPids() async {
     try {
       // pgrep 대신 ps 명령어 사용 (권한 문제 해결)
-      final result = await Process.run('ps', [
-        'aux',
-      ]);
-      
+      final result = await Process.run('ps', ['aux']);
+
       print('ps exit code: ${result.exitCode}');
-      
+
       if (result.exitCode != 0) {
         print('ps stderr: "${result.stderr}"');
         return [];
@@ -222,9 +245,9 @@ kdcproxyname:s:''';
 
       final lines = result.stdout.toString().split('\n');
       final pids = <int>[];
-      
+
       for (final line in lines) {
-        if (line.contains('Windows App.app/Contents/MacOS/Windows App') && 
+        if (line.contains('Windows App.app/Contents/MacOS/Windows App') &&
             !line.contains('grep')) {
           final parts = line.trim().split(RegExp(r'\s+'));
           if (parts.length >= 2) {
@@ -235,7 +258,7 @@ kdcproxyname:s:''';
           }
         }
       }
-          
+
       print('Found Windows App PIDs: $pids');
       return pids;
     } catch (e) {
@@ -249,16 +272,18 @@ kdcproxyname:s:''';
     try {
       // lsof를 사용하여 네트워크 연결 확인
       final lsofResult = await Process.run('lsof', [
-        '-p', pid.toString(),
-        '-i', 'TCP',
+        '-p',
+        pid.toString(),
+        '-i',
+        'TCP',
       ]);
-      
+
       if (lsofResult.exitCode == 0) {
         final output = lsofResult.stdout.toString();
         // 3389 포트 연결이 있는지 확인
         return output.contains(':3389') || output.contains('ESTABLISHED');
       }
-      
+
       return false;
     } catch (e) {
       return false;
@@ -269,14 +294,16 @@ kdcproxyname:s:''';
   Future<String> getProcessDetails(int pid) async {
     try {
       final result = await Process.run('ps', [
-        '-p', pid.toString(),
-        '-o', 'pid,ppid,state,etime,command'
+        '-p',
+        pid.toString(),
+        '-o',
+        'pid,ppid,state,etime,command',
       ]);
-      
+
       if (result.exitCode == 0) {
         return result.stdout.toString();
       }
-      
+
       return 'Process not found';
     } catch (e) {
       return 'Error getting process details: $e';

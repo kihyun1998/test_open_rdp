@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../services/window_manager_service.dart';
 
 class PidWindowsList extends StatefulWidget {
@@ -57,18 +58,12 @@ class _PidWindowsListState extends State<PidWindowsList> {
           children: [
             Text(
               'PID ${widget.pid}의 모든 창들',
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             if (_lastUpdate != null)
               Text(
                 '마지막 업데이트: ${_formatTime(_lastUpdate!)}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
           ],
         ),
@@ -77,10 +72,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
             if (_windows.isNotEmpty)
               Text(
                 '${_windows.length}개 창',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey.shade600,
-                ),
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               ),
             const SizedBox(width: 8),
             IconButton(
@@ -166,29 +158,39 @@ class _PidWindowsListState extends State<PidWindowsList> {
 
     try {
       _previousWindows = List.from(_windows);
-      
-      final allWindows = await _windowManager.getWindowsAppWindows();
-      final pidWindows = allWindows.where((window) => window.ownerPID == widget.pid).toList();
-      
-      // 변화 감지
-      final previousIds = _previousWindows.map((w) => w.windowId).toSet();
-      final currentIds = pidWindows.map((w) => w.windowId).toSet();
-      
-      final newWindows = currentIds.difference(previousIds);
-      final removedWindows = previousIds.difference(currentIds);
-      
-      if (newWindows.isNotEmpty) {
-        print('🆕 New windows: ${newWindows.toList()}');
-      }
-      if (removedWindows.isNotEmpty) {
-        print('❌ Removed windows: ${removedWindows.toList()}');
-      }
 
-      setState(() {
-        _windows = pidWindows;
-        _lastUpdate = DateTime.now();
-        _isLoading = false;
-      });
+      final result = await _windowManager.getWindowsAppWindows();
+
+      if (result.isSuccess && result.data != null) {
+        final pidWindows = result.data!
+            .where((window) => window.ownerPID == widget.pid)
+            .toList();
+
+        // 변화 감지
+        final previousIds = _previousWindows.map((w) => w.windowId).toSet();
+        final currentIds = pidWindows.map((w) => w.windowId).toSet();
+
+        final newWindows = currentIds.difference(previousIds);
+        final removedWindows = previousIds.difference(currentIds);
+
+        if (newWindows.isNotEmpty) {
+          print('🆕 New windows: ${newWindows.toList()}');
+        }
+        if (removedWindows.isNotEmpty) {
+          print('❌ Removed windows: ${removedWindows.toList()}');
+        }
+
+        setState(() {
+          _windows = pidWindows;
+          _lastUpdate = DateTime.now();
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = result.error?.toString() ?? 'Unknown error occurred';
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       print('❌ Error refreshing windows: $e');
       setState(() {
@@ -210,17 +212,10 @@ class _PidWindowsListState extends State<PidWindowsList> {
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.window,
-              color: _getWindowColor(window),
-            ),
+            Icon(Icons.window, color: _getWindowColor(window)),
             if (isNew) ...[
               const SizedBox(width: 4),
-              Icon(
-                Icons.fiber_new,
-                color: Colors.green.shade700,
-                size: 16,
-              ),
+              Icon(Icons.fiber_new, color: Colors.green.shade700, size: 16),
             ],
           ],
         ),
@@ -290,8 +285,8 @@ class _PidWindowsListState extends State<PidWindowsList> {
 
   bool _wasWindowRemoved(int windowId) {
     if (_previousWindows.isEmpty) return false;
-    return _previousWindows.any((w) => w.windowId == windowId) && 
-           !_windows.any((w) => w.windowId == windowId);
+    return _previousWindows.any((w) => w.windowId == windowId) &&
+        !_windows.any((w) => w.windowId == windowId);
   }
 
   String _getWindowPriority(WindowInfo window) {

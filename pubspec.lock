@@ -115,6 +115,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "5.1.1"
+  macos_window_toolkit:
+    dependency: "direct main"
+    description:
+      name: macos_window_toolkit
+      sha256: b119fbfb599a31338eb0220cf3acc7aae449a3d84949c59d8328111ecf4be1d1
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.4"
   matcher:
     dependency: transitive
     description:

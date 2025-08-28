@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'models/rdp_connection.dart';
 import 'services/rdp_service.dart';
 import 'services/window_manager_service.dart';
+import 'utils/error_utils.dart';
 import 'widgets/connection_form.dart';
 import 'widgets/connection_list.dart';
 import 'widgets/pid_windows_list.dart';
@@ -49,7 +50,7 @@ class RDPConnectionPage extends StatefulWidget {
 
 class _RDPConnectionPageState extends State<RDPConnectionPage> {
   final _formKey = GlobalKey<FormState>();
-  final _serverController = TextEditingController(text: "192.168.136.32");
+  final _serverController = TextEditingController(text: "192.168.136.134");
   final _usernameController = TextEditingController(text: "Administrator");
   final _passwordController = TextEditingController();
   final _portController = TextEditingController(text: '3389');
@@ -62,7 +63,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   String _connectionStatus = '';
   List<RDPConnection> _activeConnections = [];
   Timer? _autoRefreshTimer;
-  List<CapturedImage> _capturedImages = [];
+  final List<CapturedImage> _capturedImages = [];
 
   @override
   void dispose() {
@@ -155,12 +156,14 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
       final List<RDPConnection> updatedConnections = [];
 
       for (final connection in _activeConnections) {
-        final isAlive = await _rdpService.isWindowAlive(connection.windowId);
+        final result = await _windowManager.isWindowAlive(connection.windowId);
 
-        if (isAlive) {
+        if (result.isSuccess && result.data == true) {
           updatedConnections.add(connection);
+        } else if (!result.isSuccess) {
+          print('Warning: ${result.error}');
         }
-        // Window가 사라진 경우 연결 목록에서 제거
+        // Window가 사라진 경우 또는 오류 시 연결 목록에서 제거
       }
 
       setState(() {
@@ -186,18 +189,24 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     });
 
     try {
-      final isAlive = await _rdpService.isWindowAlive(connection.windowId);
+      final result = await _windowManager.isWindowAlive(connection.windowId);
 
-      if (isAlive) {
-        setState(() {
-          _connectionStatus =
-              'Connection to ${connection.server} (Window ID: ${connection.windowId}) is active';
-        });
+      if (result.isSuccess) {
+        if (result.data == true) {
+          setState(() {
+            _connectionStatus =
+                'Connection to ${connection.server} (Window ID: ${connection.windowId}) is active';
+          });
+        } else {
+          setState(() {
+            _activeConnections.removeAt(index);
+            _connectionStatus =
+                'Connection to ${connection.server} removed (window closed)';
+          });
+        }
       } else {
         setState(() {
-          _activeConnections.removeAt(index);
-          _connectionStatus =
-              'Connection to ${connection.server} removed (window closed)';
+          _connectionStatus = 'Failed to refresh connection: ${result.error}';
         });
       }
     } catch (e) {
@@ -215,13 +224,23 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
 
     try {
       // 닫기 전 윈도우가 존재하는지 확인
-      final isAlive = await _windowManager.isWindowAlive(windowId);
-      print('🔄 Main: Window $windowId is alive before close: $isAlive');
+      final aliveResult = await _windowManager.isWindowAlive(windowId);
+      if (!aliveResult.isSuccess && mounted) {
+        ErrorUtils.showErrorDialog(context, '창 상태 확인 실패', aliveResult.error!);
+        setState(() {
+          _connectionStatus =
+              'Error checking window status: ${aliveResult.error}';
+        });
+        return;
+      }
+      print(
+        '🔄 Main: Window $windowId is alive before close: ${aliveResult.data}',
+      );
 
-      final success = await _windowManager.closeWindow(windowId);
-      print('🔄 Main: Close operation result: $success');
+      final closeResult = await _windowManager.closeWindow(windowId);
+      print('🔄 Main: Close operation result: ${closeResult.isSuccess}');
 
-      if (success) {
+      if (closeResult.isSuccess && closeResult.data == true) {
         setState(() {
           _connectionStatus =
               'Window ID $windowId close command sent successfully';
@@ -229,21 +248,29 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
 
         // 창이 실제로 닫혔는지 확인
         await Future.delayed(const Duration(seconds: 2));
-        final isStillAlive = await _windowManager.isWindowAlive(windowId);
-        print('🔄 Main: Window $windowId is alive after close: $isStillAlive');
+        final stillAliveResult = await _windowManager.isWindowAlive(windowId);
 
-        setState(() {
-          _connectionStatus = isStillAlive
-              ? 'Window ID $windowId may still be open (check manually)'
-              : 'Window ID $windowId successfully closed';
-        });
+        if (stillAliveResult.isSuccess) {
+          print(
+            '🔄 Main: Window $windowId is alive after close: ${stillAliveResult.data}',
+          );
+          setState(() {
+            _connectionStatus = (stillAliveResult.data == true)
+                ? 'Window ID $windowId may still be open (check manually)'
+                : 'Window ID $windowId successfully closed';
+          });
+        }
 
         // 연결 목록 새로고침
         await _refreshAllConnections();
       } else {
+        if (mounted && !closeResult.isSuccess) {
+          ErrorUtils.showErrorDialog(context, '창 닫기 실패', closeResult.error!);
+        }
         setState(() {
-          _connectionStatus =
-              'Failed to close window ID $windowId - command returned false';
+          _connectionStatus = closeResult.isSuccess
+              ? 'Failed to close window ID $windowId - command returned false'
+              : 'Failed to close window: ${closeResult.error}';
         });
       }
     } catch (e) {
@@ -261,21 +288,27 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     });
 
     try {
-      final imageData = await _windowManager.captureWindow(windowId);
-      if (imageData != null && imageData.isNotEmpty) {
+      final result = await _windowManager.captureWindow(windowId);
+
+      if (result.isSuccess && result.data != null) {
         final capturedImage = CapturedImage(
           windowId: windowId,
-          imageData: imageData,
+          imageData: result.data!,
           capturedAt: DateTime.now(),
         );
-        
+
         setState(() {
           _capturedImages.add(capturedImage);
           _connectionStatus = 'Window ID $windowId captured successfully';
         });
       } else {
+        if (mounted && !result.isSuccess) {
+          ErrorUtils.showErrorDialog(context, '화면 캡처 실패', result.error!);
+        }
         setState(() {
-          _connectionStatus = 'Failed to capture window ID $windowId';
+          _connectionStatus = result.isSuccess
+              ? 'Failed to capture window ID $windowId'
+              : 'Capture failed: ${result.error}';
         });
       }
     } catch (e) {
@@ -323,14 +356,23 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                   final connection = _activeConnections.firstWhere(
                     (c) => c.windowId == windowId,
                   );
-                  final isAlive = await _rdpService.isWindowAlive(
+                  final result = await _windowManager.isWindowAlive(
                     connection.windowId,
                   );
                   if (mounted) {
                     setState(() {
-                      _connectionStatus = isAlive
-                          ? 'Window ID $windowId is active'
-                          : 'Window ID $windowId is not active';
+                      if (result.isSuccess) {
+                        _connectionStatus = (result.data == true)
+                            ? 'Window ID $windowId is active'
+                            : 'Window ID $windowId is not active';
+                      } else {
+                        ErrorUtils.showErrorSnackBar(
+                          context,
+                          '창 상태 확인 실패: ${result.error?.message}',
+                        );
+                        _connectionStatus =
+                            'Error checking status: ${result.error}';
+                      }
                     });
                   }
                 },
