@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'models/rdp_connection.dart';
+import 'models/connection_result.dart';
 import 'services/rdp_service.dart';
 import 'services/window_manager_service.dart';
 import 'utils/error_utils.dart';
@@ -97,14 +98,14 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     }
   }
 
-  Future<RDPConnection?> _connectRDP() async {
-    if (!_formKey.currentState!.validate()) return null;
+  Future<void> _connectRDP() async {
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() {
       _isConnecting = true;
     });
 
-    final connection = await _rdpService.connectRDP(
+    final result = await _rdpService.connectRDP(
       server: _serverController.text,
       username: _usernameController.text,
       password: _passwordController.text,
@@ -121,13 +122,39 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     if (mounted) {
       setState(() {
         _isConnecting = false;
-        if (connection != null) {
-          _activeConnections.add(connection);
+        
+        // 결과에 따른 상태 업데이트
+        switch (result.type) {
+          case ConnectionResultType.success:
+            if (result.connection != null) {
+              _activeConnections.add(result.connection!);
+            }
+            _connectionStatus = '✅ ${result.message}';
+            break;
+          case ConnectionResultType.existingFocused:
+            _connectionStatus = '🔄 ${result.message}';
+            break;
+          case ConnectionResultType.appError:
+            _connectionStatus = '⚠️ ${result.message}';
+            if (result.error != null) {
+              _connectionStatus += '\nError: ${result.error}';
+            }
+            break;
+          case ConnectionResultType.commandFailed:
+            _connectionStatus = '❌ ${result.message}';
+            if (result.error != null) {
+              _connectionStatus += '\nError: ${result.error}';
+            }
+            break;
+          case ConnectionResultType.appNotFound:
+            _connectionStatus = '🚫 ${result.message}';
+            if (result.error != null) {
+              _connectionStatus += '\n${result.error}';
+            }
+            break;
         }
       });
     }
-
-    return connection;
   }
 
   Future<void> _killConnection(RDPConnection connection) async {

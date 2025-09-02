@@ -4,6 +4,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/rdp_connection.dart';
+import '../models/connection_result.dart';
 import 'window_manager_service.dart';
 
 class RDPService {
@@ -83,7 +84,26 @@ kdcproxyname:s:''';
     return password;
   }
 
-  Future<RDPConnection?> connectRDP({
+  Future<bool> isWindowsAppInstalled() async {
+    try {
+      // 1. 파일 시스템 체크
+      final appDir = Directory('/Applications/Windows App.app');
+      if (await appDir.exists()) {
+        return true;
+      }
+
+      // 2. mdfind로 검색 (Spotlight 데이터베이스)
+      final result = await Process.run('mdfind', [
+        'kMDItemDisplayName == "Windows App" && kMDItemKind == "Application"'
+      ]);
+      
+      return result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<ConnectionResult> connectRDP({
     required String server,
     required String username,
     required String password,
@@ -91,6 +111,17 @@ kdcproxyname:s:''';
     required Function(String) onStatusUpdate,
   }) async {
     try {
+      // 0. Windows App 설치 확인
+      onStatusUpdate('Checking Windows App installation...');
+      final isInstalled = await isWindowsAppInstalled();
+      if (!isInstalled) {
+        return ConnectionResult(
+          type: ConnectionResultType.appNotFound,
+          message: 'Windows App is not installed on this system',
+          error: 'Please install Windows App from the App Store',
+        );
+      }
+
       onStatusUpdate('Creating RDP file...');
 
       // 1. 실행 전 기존 Window 목록 저장
@@ -125,7 +156,19 @@ kdcproxyname:s:''';
       ]);
 
       if (result.exitCode != 0) {
-        throw Exception('Failed to start Windows App: ${result.stderr}');
+        final errorMsg = result.stderr.toString();
+        if (errorMsg.contains('Unable to find application')) {
+          return ConnectionResult(
+            type: ConnectionResultType.appNotFound,
+            message: 'Windows App not found during execution',
+            error: errorMsg,
+          );
+        }
+        return ConnectionResult(
+          type: ConnectionResultType.commandFailed,
+          message: 'Failed to execute open command',
+          error: errorMsg,
+        );
       }
 
       // 4. 새로운 Window 찾기 (폴링 방식)
@@ -169,7 +212,24 @@ kdcproxyname:s:''';
       }
 
       if (newWindow == null) {
-        throw Exception('Could not find new RDP window after 10 attempts');
+        // 새 창이 없으면 기존 창이 포커싱됐거나 앱 오류
+        final currentWindowsResult = await _windowManager.getWindowsAppWindows();
+        if (currentWindowsResult.isSuccess) {
+          final currentWindows = currentWindowsResult.data ?? [];
+          if (currentWindows.isNotEmpty) {
+            // 기존 창이 있으면 포커싱된 것으로 판단
+            return ConnectionResult(
+              type: ConnectionResultType.existingFocused,
+              message: 'Existing Windows App window was focused (${currentWindows.length} windows found)',
+            );
+          }
+        }
+        
+        // 창이 없으면 Windows App 내부 오류
+        return ConnectionResult(
+          type: ConnectionResultType.appError,
+          message: 'Windows App failed to create new window - possible internal error',
+        );
       }
 
       // 5. 연결 정보 생성
@@ -195,10 +255,18 @@ kdcproxyname:s:''';
         }
       });
 
-      return connection;
+      return ConnectionResult(
+        type: ConnectionResultType.success,
+        connection: connection,
+        message: 'RDP window created successfully! Window ID: ${newWindow.windowId}, PID: ${newWindow.ownerPID}',
+      );
     } catch (e) {
       onStatusUpdate('Connection failed: $e');
-      return null;
+      return ConnectionResult(
+        type: ConnectionResultType.appError,
+        message: 'Connection failed due to unexpected error',
+        error: e.toString(),
+      );
     }
   }
 
