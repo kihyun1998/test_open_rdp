@@ -103,6 +103,7 @@ kdcproxyname:s:''';
     }
   }
 
+// TODO: 핵심은 pid의 
   Future<ConnectionResult> connectRDP({
     required String server,
     required String username,
@@ -198,16 +199,35 @@ kdcproxyname:s:''';
             .toList();
 
         if (newWindows.isNotEmpty) {
-          // 가장 큰 창을 RDP 메인 창으로 선택 (면적 기준)
-          newWindow = newWindows.reduce((a, b) {
-            final areaA = a.width * a.height;
-            final areaB = b.width * b.height;
-            return areaA > areaB ? a : b;
-          });
-          onStatusUpdate(
-            'Found new RDP window: ID ${newWindow.windowId}, Size: ${newWindow.width.toInt()}x${newWindow.height.toInt()}',
-          );
-          break;
+          onStatusUpdate('Checking ${newWindows.length} new window(s) for RDP file match...');
+
+          // RDP 파일명 추출 (경로에서 파일명만, 확장자 제외)
+          final rdpFileName = path.basenameWithoutExtension(rdpFilePath);
+          onStatusUpdate('Looking for window with RDP file: $rdpFileName');
+
+          // 새 창들 중에서 RDP 파일명이 제목에 포함된 창 찾기
+          final matchingWindows = newWindows.where((w) {
+            final title = w.windowName.toLowerCase();
+            final fileNameLower = rdpFileName.toLowerCase();
+            return title.contains(fileNameLower);
+          }).toList();
+
+          if (matchingWindows.isNotEmpty) {
+            // 매칭된 창 중 가장 큰 창 선택
+            newWindow = matchingWindows.reduce((a, b) {
+              final areaA = a.width * a.height;
+              final areaB = b.width * b.height;
+              return areaA > areaB ? a : b;
+            });
+            onStatusUpdate(
+              'Found RDP window: ID ${newWindow.windowId}, Title: "${newWindow.windowName}", Size: ${newWindow.width.toInt()}x${newWindow.height.toInt()}',
+            );
+            break;
+          } else {
+            onStatusUpdate(
+              'Found ${newWindows.length} new window(s) but no title match with "$rdpFileName" (attempt $attempt/10)',
+            );
+          }
         } else {
           onStatusUpdate('No new windows found in attempt $attempt');
         }
@@ -289,6 +309,53 @@ kdcproxyname:s:''';
   Future<bool> isWindowAlive(int windowId) async {
     final result = await _windowManager.isWindowAlive(windowId);
     return result.isSuccess && (result.data ?? false);
+  }
+
+  /// RDP 파일명으로 실제 창을 찾아서 연결 정보를 업데이트
+  Future<RDPConnection?> findAndUpdateConnection(RDPConnection connection) async {
+    try {
+      // RDP 파일명 추출 (확장자 제외)
+      final rdpFileName = path.basenameWithoutExtension(connection.rdpFilePath);
+
+      // 모든 Windows App 창 가져오기
+      final windowsResult = await _windowManager.getWindowsAppWindows();
+      if (!windowsResult.isSuccess) {
+        return null;
+      }
+
+      final allWindows = windowsResult.data ?? [];
+
+      // RDP 파일명이 제목에 포함된 창 찾기
+      final matchingWindows = allWindows.where((w) {
+        final title = w.windowName.toLowerCase();
+        final fileNameLower = rdpFileName.toLowerCase();
+        return title.contains(fileNameLower);
+      }).toList();
+
+      if (matchingWindows.isEmpty) {
+        return null;
+      }
+
+      // 가장 큰 창 선택
+      final targetWindow = matchingWindows.reduce((a, b) {
+        final areaA = a.width * a.height;
+        final areaB = b.width * b.height;
+        return areaA > areaB ? a : b;
+      });
+
+      // 연결 정보 업데이트
+      return RDPConnection(
+        server: connection.server,
+        username: connection.username,
+        port: connection.port,
+        windowId: targetWindow.windowId,
+        pid: targetWindow.ownerPID,
+        rdpFilePath: connection.rdpFilePath,
+        connectedAt: connection.connectedAt,
+      );
+    } catch (e) {
+      return null;
+    }
   }
 
   // 기존 PID 기반 메서드도 유지 (호환성)

@@ -183,14 +183,13 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
       final List<RDPConnection> updatedConnections = [];
 
       for (final connection in _activeConnections) {
-        final result = await _windowManager.isWindowAlive(connection.windowId);
+        // RDP 파일명으로 실제 창 찾기
+        final foundConnection = await _rdpService.findAndUpdateConnection(connection);
 
-        if (result.isSuccess && result.data == true) {
-          updatedConnections.add(connection);
-        } else if (!result.isSuccess) {
-          print('Warning: ${result.error}');
+        if (foundConnection != null) {
+          updatedConnections.add(foundConnection);
         }
-        // Window가 사라진 경우 또는 오류 시 연결 목록에서 제거
+        // 찾지 못한 경우 목록에서 제거
       }
 
       setState(() {
@@ -216,24 +215,20 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     });
 
     try {
-      final result = await _windowManager.isWindowAlive(connection.windowId);
+      // RDP 파일명으로 실제 창 찾기
+      final foundConnection = await _rdpService.findAndUpdateConnection(connection);
 
-      if (result.isSuccess) {
-        if (result.data == true) {
-          setState(() {
-            _connectionStatus =
-                'Connection to ${connection.server} (Window ID: ${connection.windowId}) is active';
-          });
-        } else {
-          setState(() {
-            _activeConnections.removeAt(index);
-            _connectionStatus =
-                'Connection to ${connection.server} removed (window closed)';
-          });
-        }
+      if (foundConnection != null) {
+        setState(() {
+          _activeConnections[index] = foundConnection;
+          _connectionStatus =
+              'Connection to ${connection.server} updated (Window ID: ${foundConnection.windowId})';
+        });
       } else {
         setState(() {
-          _connectionStatus = 'Failed to refresh connection: ${result.error}';
+          _activeConnections.removeAt(index);
+          _connectionStatus =
+              'Connection to ${connection.server} removed (window not found)';
         });
       }
     } catch (e) {
