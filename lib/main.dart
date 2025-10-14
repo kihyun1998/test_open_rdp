@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-import 'models/rdp_connection.dart';
 import 'models/connection_result.dart';
+import 'models/rdp_connection.dart';
 import 'services/rdp_service.dart';
 import 'services/window_manager_service.dart';
 import 'utils/error_utils.dart';
@@ -122,7 +122,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     if (mounted) {
       setState(() {
         _isConnecting = false;
-        
+
         // 결과에 따른 상태 업데이트
         switch (result.type) {
           case ConnectionResultType.success:
@@ -184,7 +184,9 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
 
       for (final connection in _activeConnections) {
         // RDP 파일명으로 실제 창 찾기
-        final foundConnection = await _rdpService.findAndUpdateConnection(connection);
+        final foundConnection = await _rdpService.findAndUpdateConnection(
+          connection,
+        );
 
         if (foundConnection != null) {
           updatedConnections.add(foundConnection);
@@ -216,7 +218,9 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
 
     try {
       // RDP 파일명으로 실제 창 찾기
-      final foundConnection = await _rdpService.findAndUpdateConnection(connection);
+      final foundConnection = await _rdpService.findAndUpdateConnection(
+        connection,
+      );
 
       if (foundConnection != null) {
         setState(() {
@@ -398,43 +402,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                     });
                   }
                 },
-                onCheckRDPConnection: (windowId) async {
-                  final connection = _activeConnections.firstWhere(
-                    (c) => c.windowId == windowId,
-                  );
-                  setState(() {
-                    _connectionStatus =
-                        'Checking RDP connection for Window ID $windowId...';
-                  });
-                  final isRDPConnected = await _rdpService.isRDPConnection(
-                    connection.pid,
-                  );
-                  if (mounted) {
-                    setState(() {
-                      _connectionStatus = isRDPConnected
-                          ? 'Window ID $windowId has active RDP connection'
-                          : 'Window ID $windowId has no active RDP connection';
-                    });
-                  }
-                },
-                onGetProcessDetails: (windowId) async {
-                  final connection = _activeConnections.firstWhere(
-                    (c) => c.windowId == windowId,
-                  );
-                  setState(() {
-                    _connectionStatus =
-                        'Getting details for Window ID $windowId...';
-                  });
-                  final details = await _rdpService.getProcessDetails(
-                    connection.pid,
-                  );
-                  if (mounted) {
-                    setState(() {
-                      _connectionStatus =
-                          'Window ID $windowId details:\n$details';
-                    });
-                  }
-                },
+
                 onKillConnection: _killConnection,
               ),
               const SizedBox(height: 16),

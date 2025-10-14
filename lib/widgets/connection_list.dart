@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/rdp_connection.dart';
 
 class ConnectionList extends StatelessWidget {
@@ -9,8 +10,7 @@ class ConnectionList extends StatelessWidget {
   final VoidCallback onToggleAutoRefresh;
   final Function(int) onRefreshSingle;
   final Function(int) onCheckStatus;
-  final Function(int) onCheckRDPConnection;
-  final Function(int) onGetProcessDetails;
+
   final Function(RDPConnection) onKillConnection;
 
   const ConnectionList({
@@ -22,8 +22,7 @@ class ConnectionList extends StatelessWidget {
     required this.onToggleAutoRefresh,
     required this.onRefreshSingle,
     required this.onCheckStatus,
-    required this.onCheckRDPConnection,
-    required this.onGetProcessDetails,
+
     required this.onKillConnection,
   });
 
@@ -69,9 +68,7 @@ class ConnectionList extends StatelessWidget {
                       ? const SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.refresh),
                   tooltip: 'Refresh All Connections',
@@ -83,10 +80,7 @@ class ConnectionList extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   '${connections.length} active',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
                 ),
               ],
             ),
@@ -129,28 +123,7 @@ class ConnectionList extends StatelessWidget {
                     ),
                     onTap: () => onCheckStatus(connection.windowId),
                   ),
-                  PopupMenuItem(
-                    value: 'rdp_check',
-                    child: const Row(
-                      children: [
-                        Icon(Icons.network_check, color: Colors.green),
-                        SizedBox(width: 8),
-                        Text('Check RDP Connection'),
-                      ],
-                    ),
-                    onTap: () => onCheckRDPConnection(connection.windowId),
-                  ),
-                  PopupMenuItem(
-                    value: 'details',
-                    child: const Row(
-                      children: [
-                        Icon(Icons.description, color: Colors.orange),
-                        SizedBox(width: 8),
-                        Text('Process Details'),
-                      ],
-                    ),
-                    onTap: () => onGetProcessDetails(connection.windowId),
-                  ),
+
                   PopupMenuItem(
                     value: 'kill',
                     child: const Row(

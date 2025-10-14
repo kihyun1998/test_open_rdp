@@ -103,7 +103,6 @@ kdcproxyname:s:''';
     }
   }
 
-// TODO: 핵심은 pid의 
   Future<ConnectionResult> connectRDP({
     required String server,
     required String username,
@@ -112,7 +111,7 @@ kdcproxyname:s:''';
     required Function(String) onStatusUpdate,
   }) async {
     try {
-      // 0. Windows App 설치 확인
+      // 1. Windows App 설치 확인
       onStatusUpdate('Checking Windows App installation...');
       final isInstalled = await isWindowsAppInstalled();
       if (!isInstalled) {
@@ -125,22 +124,8 @@ kdcproxyname:s:''';
       }
       print('✅ Windows App found - ready to launch');
 
-      onStatusUpdate('Creating RDP file...');
-
-      // 1. 실행 전 기존 Window 목록 저장
-      final existingWindowsResult = await _windowManager.getWindowsAppWindows();
-      if (!existingWindowsResult.isSuccess) {
-        throw Exception(
-          'Failed to get existing windows: ${existingWindowsResult.error}',
-        );
-      }
-      final existingWindows = existingWindowsResult.data ?? [];
-      onStatusUpdate(
-        'Found ${existingWindows.length} existing Windows App windows',
-      );
-      final existingWindowIds = existingWindows.map((w) => w.windowId).toSet();
-
       // 2. RDP 파일 생성
+      onStatusUpdate('Creating RDP file...');
       final rdpFilePath = await createRdpFile(
         server: server,
         username: username,
@@ -148,11 +133,9 @@ kdcproxyname:s:''';
         port: port,
       );
 
+      // 3. Windows App 실행
       onStatusUpdate('Starting Windows App...');
-
-      // 3. Windows App 실행 (새 인스턴스 강제 실행)
       final result = await Process.run('open', [
-        // '-n', // 새 인스턴스 강제 실행
         '-a',
         'Windows App',
         rdpFilePath,
@@ -174,102 +157,44 @@ kdcproxyname:s:''';
         );
       }
 
-      // 4. 새로운 Window 찾기 (폴링 방식)
-      onStatusUpdate('Waiting for new window to appear...');
-      WindowInfo? newWindow;
-
-      for (int attempt = 1; attempt <= 10; attempt++) {
-        await Future.delayed(const Duration(seconds: 3));
-        onStatusUpdate('Looking for new window (attempt $attempt/10)...');
-
-        final currentWindowsResult = await _windowManager
-            .getWindowsAppWindows();
-        if (!currentWindowsResult.isSuccess) {
-          onStatusUpdate(
-            'Failed to get current windows: ${currentWindowsResult.error}',
-          );
-          continue;
-        }
-        final currentWindows = currentWindowsResult.data ?? [];
-        onStatusUpdate('Found ${currentWindows.length} total windows');
-
-        // 새로운 윈도우 찾기
-        final newWindows = currentWindows
-            .where((w) => !existingWindowIds.contains(w.windowId))
-            .toList();
-
-        if (newWindows.isNotEmpty) {
-          onStatusUpdate('Checking ${newWindows.length} new window(s) for RDP file match...');
-
-          // RDP 파일명 추출 (경로에서 파일명만, 확장자 제외)
-          final rdpFileName = path.basenameWithoutExtension(rdpFilePath);
-          onStatusUpdate('Looking for window with RDP file: $rdpFileName');
-
-          // 새 창들 중에서 RDP 파일명이 제목에 포함된 창 찾기
-          final matchingWindows = newWindows.where((w) {
-            final title = w.windowName.toLowerCase();
-            final fileNameLower = rdpFileName.toLowerCase();
-            return title.contains(fileNameLower);
-          }).toList();
-
-          if (matchingWindows.isNotEmpty) {
-            // 매칭된 창 중 가장 큰 창 선택
-            newWindow = matchingWindows.reduce((a, b) {
-              final areaA = a.width * a.height;
-              final areaB = b.width * b.height;
-              return areaA > areaB ? a : b;
-            });
-            onStatusUpdate(
-              'Found RDP window: ID ${newWindow.windowId}, Title: "${newWindow.windowName}", Size: ${newWindow.width.toInt()}x${newWindow.height.toInt()}',
-            );
-            break;
-          } else {
-            onStatusUpdate(
-              'Found ${newWindows.length} new window(s) but no title match with "$rdpFileName" (attempt $attempt/10)',
-            );
-          }
-        } else {
-          onStatusUpdate('No new windows found in attempt $attempt');
-        }
-      }
-
-      if (newWindow == null) {
-        // 새 창이 없으면 기존 창이 포커싱됐거나 앱 오류
-        final currentWindowsResult = await _windowManager.getWindowsAppWindows();
-        if (currentWindowsResult.isSuccess) {
-          final currentWindows = currentWindowsResult.data ?? [];
-          if (currentWindows.isNotEmpty) {
-            // 기존 창이 있으면 포커싱된 것으로 판단
-            return ConnectionResult(
-              type: ConnectionResultType.existingFocused,
-              message: 'Existing Windows App window was focused (${currentWindows.length} windows found)',
-            );
-          }
-        }
-        
-        // 창이 없으면 Windows App 내부 오류
+      // 4. Windows App PID 대기
+      onStatusUpdate('Waiting for Windows App to launch...');
+      final pid = await _waitForWindowsAppPid();
+      if (pid == null) {
         return ConnectionResult(
           type: ConnectionResultType.appError,
-          message: 'Windows App failed to create new window - possible internal error',
+          message: 'Failed to find Windows App process',
+        );
+      }
+      onStatusUpdate('Windows App running with PID: $pid');
+
+      // 5. PID로 필터링하여 RDP Window 찾기
+      onStatusUpdate('Looking for RDP window...');
+      final windowId = await _findWindowByPidAndFileName(pid, rdpFilePath);
+
+      if (windowId == null) {
+        return ConnectionResult(
+          type: ConnectionResultType.appError,
+          message: 'Failed to find RDP window - connection may have failed',
         );
       }
 
-      // 5. 연결 정보 생성
+      // 6. 연결 정보 생성
       final connection = RDPConnection(
         server: server,
         username: username,
         port: port,
-        windowId: newWindow.windowId,
-        pid: newWindow.ownerPID,
+        windowId: windowId,
+        pid: pid,
         rdpFilePath: rdpFilePath,
         connectedAt: DateTime.now(),
       );
 
       onStatusUpdate(
-        'RDP window created! Window ID: ${newWindow.windowId}, PID: ${newWindow.ownerPID}',
+        'RDP window created! Window ID: $windowId, PID: $pid',
       );
 
-      // 6. 임시 파일 정리 (연결 후 일정 시간 뒤)
+      // 7. 임시 파일 정리 (연결 후 일정 시간 뒤)
       Future.delayed(const Duration(minutes: 1), () {
         final file = File(rdpFilePath);
         if (file.existsSync()) {
@@ -280,7 +205,7 @@ kdcproxyname:s:''';
       return ConnectionResult(
         type: ConnectionResultType.success,
         connection: connection,
-        message: 'RDP window created successfully! Window ID: ${newWindow.windowId}, PID: ${newWindow.ownerPID}',
+        message: 'RDP connection successful! Window ID: $windowId, PID: $pid',
       );
     } catch (e) {
       onStatusUpdate('Connection failed: $e');
@@ -290,6 +215,59 @@ kdcproxyname:s:''';
         error: e.toString(),
       );
     }
+  }
+
+  /// Windows App PID를 찾을 때까지 대기 (최대 10초)
+  Future<int?> _waitForWindowsAppPid() async {
+    for (int attempt = 1; attempt <= 10; attempt++) {
+      final result = await Process.run('pgrep', ['-x', 'Windows App']);
+      if (result.exitCode == 0) {
+        final pidStr = result.stdout.toString().trim();
+        final pid = int.tryParse(pidStr);
+        if (pid != null) {
+          return pid;
+        }
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    return null;
+  }
+
+  /// 특정 PID가 소유한 Window 중에서 RDP 파일명과 매칭되는 Window ID 찾기
+  Future<int?> _findWindowByPidAndFileName(int pid, String rdpFilePath) async {
+    final rdpFileName = path.basenameWithoutExtension(rdpFilePath);
+
+    // 최대 10번 시도 (새 창이 나타날 때까지 대기)
+    for (int attempt = 1; attempt <= 10; attempt++) {
+      final windowsResult = await _windowManager.getWindowsAppWindows();
+      if (!windowsResult.isSuccess) {
+        await Future.delayed(const Duration(seconds: 1));
+        continue;
+      }
+
+      final allWindows = windowsResult.data ?? [];
+
+      // PID가 일치하고 RDP 파일명이 제목에 포함된 Window 찾기
+      final matchingWindows = allWindows.where((w) {
+        final pidMatch = w.ownerPID == pid;
+        final titleMatch = w.windowName.toLowerCase().contains(rdpFileName.toLowerCase());
+        return pidMatch && titleMatch;
+      }).toList();
+
+      if (matchingWindows.isNotEmpty) {
+        // 매칭된 창 중 가장 큰 창 선택
+        final targetWindow = matchingWindows.reduce((a, b) {
+          final areaA = a.width * a.height;
+          final areaB = b.width * b.height;
+          return areaA > areaB ? a : b;
+        });
+        return targetWindow.windowId;
+      }
+
+      await Future.delayed(const Duration(seconds: 1));
+    }
+
+    return null;
   }
 
   Future<void> killConnection(RDPConnection connection) async {
@@ -314,136 +292,30 @@ kdcproxyname:s:''';
   /// RDP 파일명으로 실제 창을 찾아서 연결 정보를 업데이트
   Future<RDPConnection?> findAndUpdateConnection(RDPConnection connection) async {
     try {
-      // RDP 파일명 추출 (확장자 제외)
-      final rdpFileName = path.basenameWithoutExtension(connection.rdpFilePath);
-
-      // 모든 Windows App 창 가져오기
-      final windowsResult = await _windowManager.getWindowsAppWindows();
-      if (!windowsResult.isSuccess) {
+      // Windows App PID 찾기
+      final pid = await _waitForWindowsAppPid();
+      if (pid == null) {
         return null;
       }
 
-      final allWindows = windowsResult.data ?? [];
-
-      // RDP 파일명이 제목에 포함된 창 찾기
-      final matchingWindows = allWindows.where((w) {
-        final title = w.windowName.toLowerCase();
-        final fileNameLower = rdpFileName.toLowerCase();
-        return title.contains(fileNameLower);
-      }).toList();
-
-      if (matchingWindows.isEmpty) {
+      // PID와 파일명으로 Window 찾기
+      final windowId = await _findWindowByPidAndFileName(pid, connection.rdpFilePath);
+      if (windowId == null) {
         return null;
       }
-
-      // 가장 큰 창 선택
-      final targetWindow = matchingWindows.reduce((a, b) {
-        final areaA = a.width * a.height;
-        final areaB = b.width * b.height;
-        return areaA > areaB ? a : b;
-      });
 
       // 연결 정보 업데이트
       return RDPConnection(
         server: connection.server,
         username: connection.username,
         port: connection.port,
-        windowId: targetWindow.windowId,
-        pid: targetWindow.ownerPID,
+        windowId: windowId,
+        pid: pid,
         rdpFilePath: connection.rdpFilePath,
         connectedAt: connection.connectedAt,
       );
     } catch (e) {
       return null;
-    }
-  }
-
-  // 기존 PID 기반 메서드도 유지 (호환성)
-  Future<bool> isProcessAlive(int pid) async {
-    try {
-      final result = await Process.run('ps', ['-p', pid.toString()]);
-      return result.exitCode == 0;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  Future<List<int>> getAllWindowsAppPids() async {
-    try {
-      // pgrep 대신 ps 명령어 사용 (권한 문제 해결)
-      final result = await Process.run('ps', ['aux']);
-
-      print('ps exit code: ${result.exitCode}');
-
-      if (result.exitCode != 0) {
-        print('ps stderr: "${result.stderr}"');
-        return [];
-      }
-
-      final lines = result.stdout.toString().split('\n');
-      final pids = <int>[];
-
-      for (final line in lines) {
-        if (line.contains('Windows App.app/Contents/MacOS/Windows App') &&
-            !line.contains('grep')) {
-          final parts = line.trim().split(RegExp(r'\s+'));
-          if (parts.length >= 2) {
-            final pid = int.tryParse(parts[1]); // PID는 두 번째 컬럼
-            if (pid != null) {
-              pids.add(pid);
-            }
-          }
-        }
-      }
-
-      print('Found Windows App PIDs: $pids');
-      return pids;
-    } catch (e) {
-      print('Error in getAllWindowsAppPids: $e');
-      return [];
-    }
-  }
-
-  /// 프로세스의 상세 정보를 확인하여 실제 RDP 연결인지 판단
-  Future<bool> isRDPConnection(int pid) async {
-    try {
-      // lsof를 사용하여 네트워크 연결 확인
-      final lsofResult = await Process.run('lsof', [
-        '-p',
-        pid.toString(),
-        '-i',
-        'TCP',
-      ]);
-
-      if (lsofResult.exitCode == 0) {
-        final output = lsofResult.stdout.toString();
-        // 3389 포트 연결이 있는지 확인
-        return output.contains(':3389') || output.contains('ESTABLISHED');
-      }
-
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// 프로세스가 실제로 활성 상태인지 더 자세히 확인
-  Future<String> getProcessDetails(int pid) async {
-    try {
-      final result = await Process.run('ps', [
-        '-p',
-        pid.toString(),
-        '-o',
-        'pid,ppid,state,etime,command',
-      ]);
-
-      if (result.exitCode == 0) {
-        return result.stdout.toString();
-      }
-
-      return 'Process not found';
-    } catch (e) {
-      return 'Error getting process details: $e';
     }
   }
 }
