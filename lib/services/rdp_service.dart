@@ -115,12 +115,14 @@ kdcproxyname:s:''';
       onStatusUpdate('Checking Windows App installation...');
       final isInstalled = await isWindowsAppInstalled();
       if (!isInstalled) {
+        print('❌ Windows App not found on this system');
         return ConnectionResult(
           type: ConnectionResultType.appNotFound,
           message: 'Windows App is not installed on this system',
           error: 'Please install Windows App from the App Store',
         );
       }
+      print('✅ Windows App found - ready to launch');
 
       onStatusUpdate('Creating RDP file...');
 
