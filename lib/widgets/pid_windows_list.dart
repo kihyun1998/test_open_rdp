@@ -95,7 +95,27 @@ class _PidWindowsListState extends State<PidWindowsList> {
     if (_screenInfo == null) return;
 
     try {
+      // 매번 최신 창 목록을 가져옴
+      final result = await _manager.getWindowsForPid(widget.pid);
+
+      if (!result.isSuccess || result.windows == null) {
+        return;
+      }
+
+      // 창 목록 업데이트 (setState 없이 내부 변수만 갱신)
+      _windows = result.windows!;
+
       final displayedWindows = _getDisplayedWindows();
+
+      // 창이 모두 사라졌으면 폴링 중지
+      if (displayedWindows.isEmpty) {
+        print('⚠️ No windows found, stopping verification');
+        _verificationTimer?.cancel();
+        setState(() {
+          _isVerifying = false;
+        });
+        return;
+      }
 
       for (final window in displayedWindows) {
         // 이미 검증된 창은 스킵
@@ -119,6 +139,13 @@ class _PidWindowsListState extends State<PidWindowsList> {
           });
           return;
         }
+      }
+
+      // UI 업데이트 (검증 중에도 창 목록 표시)
+      if (mounted) {
+        setState(() {
+          _lastUpdate = DateTime.now();
+        });
       }
     } catch (e) {
       print('❌ Error checking full screen window: $e');

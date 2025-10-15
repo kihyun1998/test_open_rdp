@@ -115,9 +115,14 @@ class WindowManagerService {
       final match = resolutionRegex.firstMatch(output);
 
       if (match != null) {
-        final width = double.parse(match.group(1)!);
-        final height = double.parse(match.group(2)!);
-        return WindowManagerResult.success(ScreenInfo(width, height));
+        final physicalWidth = double.parse(match.group(1)!);
+        final physicalHeight = double.parse(match.group(2)!);
+
+        // Retina 디스플레이는 2x 스케일링 사용 (물리 픽셀 / 2 = 논리 픽셀)
+        final logicalWidth = physicalWidth / 2;
+        final logicalHeight = physicalHeight / 2;
+
+        return WindowManagerResult.success(ScreenInfo(logicalWidth, logicalHeight));
       }
 
       // Retina 형식이 없으면 일반 해상도 찾기 "Resolution: 1920 x 1080"
@@ -127,6 +132,7 @@ class WindowManagerService {
       if (simpleMatch != null) {
         final width = double.parse(simpleMatch.group(1)!);
         final height = double.parse(simpleMatch.group(2)!);
+        // 일반 해상도는 이미 논리 픽셀
         return WindowManagerResult.success(ScreenInfo(width, height));
       }
 
