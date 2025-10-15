@@ -11,8 +11,9 @@ class PidWindowsList extends StatefulWidget {
   final String? rdpFilePath;
   final Function(int) onCloseWindow;
   final Function(int) onCaptureWindow;
-  final Set<int> verifiedWindowIds;
-  final Function(int) onWindowVerified;
+  final Map<String, int> verifiedWindows;
+  final Function(String, int) onWindowVerified;
+  final VoidCallback onConnectionClosed;
 
   const PidWindowsList({
     super.key,
@@ -20,8 +21,9 @@ class PidWindowsList extends StatefulWidget {
     this.rdpFilePath,
     required this.onCloseWindow,
     required this.onCaptureWindow,
-    required this.verifiedWindowIds,
+    required this.verifiedWindows,
     required this.onWindowVerified,
+    required this.onConnectionClosed,
   });
 
   @override
@@ -107,19 +109,27 @@ class _PidWindowsListState extends State<PidWindowsList> {
 
       final displayedWindows = _getDisplayedWindows();
 
-      // 창이 모두 사라졌으면 폴링 중지
+      // 창이 모두 사라졌으면 폴링 중지 및 연결 종료 알림
       if (displayedWindows.isEmpty) {
         print('⚠️ No windows found, stopping verification');
         _verificationTimer?.cancel();
         setState(() {
           _isVerifying = false;
         });
+        // 연결 종료 콜백 호출
+        widget.onConnectionClosed();
         return;
       }
 
+      // 현재 RDP 파일명 추출
+      final rdpFileName = widget.rdpFilePath != null
+          ? path.basenameWithoutExtension(widget.rdpFilePath!)
+          : null;
+
       for (final window in displayedWindows) {
-        // 이미 검증된 창은 스킵
-        if (widget.verifiedWindowIds.contains(window.windowId)) {
+        // 이미 검증된 창은 스킵 (rdpFileName + windowId 조합으로 체크)
+        if (rdpFileName != null &&
+            widget.verifiedWindows[rdpFileName] == window.windowId) {
           continue;
         }
 
@@ -128,9 +138,12 @@ class _PidWindowsListState extends State<PidWindowsList> {
           print('✅ Full screen RDP window detected: ${window.windowId}');
           print('   Window size: ${window.width}x${window.height}');
           print('   Screen size: ${_screenInfo!.width}x${_screenInfo!.height}');
+          print('   RDP file: $rdpFileName');
 
-          // 검증 완료 처리
-          widget.onWindowVerified(window.windowId);
+          // 검증 완료 처리 (rdpFileName과 windowId 둘 다 전달)
+          if (rdpFileName != null) {
+            widget.onWindowVerified(rdpFileName, window.windowId);
+          }
 
           // 폴링 중지
           _verificationTimer?.cancel();
@@ -176,9 +189,10 @@ class _PidWindowsListState extends State<PidWindowsList> {
     final rdpFileName = isFiltered
         ? path.basenameWithoutExtension(widget.rdpFilePath!)
         : null;
-    final verifiedCount = displayedWindows
-        .where((w) => widget.verifiedWindowIds.contains(w.windowId))
-        .length;
+
+    // 현재 RDP 연결의 검증 상태 체크
+    final isVerified = rdpFileName != null &&
+        widget.verifiedWindows.containsKey(rdpFileName);
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -214,7 +228,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
                     ),
                   ),
                 ],
-                if (verifiedCount > 0) ...[
+                if (isVerified) ...[
                   const SizedBox(width: 8),
                   Icon(Icons.verified, color: Colors.green.shade700, size: 16),
                   const SizedBox(width: 4),
@@ -592,7 +606,13 @@ class _PidWindowsListState extends State<PidWindowsList> {
   Widget _buildWindowCard(WindowInfo window) {
     final isNew = _manager.isNewWindow(window.windowId, _previousWindows);
     final isRdpConnection = _manager.isRdpConnectionWindow(window);
-    final isVerified = widget.verifiedWindowIds.contains(window.windowId);
+
+    // 현재 RDP 파일명으로 검증 체크
+    final rdpFileName = widget.rdpFilePath != null
+        ? path.basenameWithoutExtension(widget.rdpFilePath!)
+        : null;
+    final isVerified = rdpFileName != null &&
+        widget.verifiedWindows[rdpFileName] == window.windowId;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),

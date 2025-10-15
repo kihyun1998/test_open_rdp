@@ -17,6 +17,19 @@ class RDPConnectionPage extends StatefulWidget {
   State<RDPConnectionPage> createState() => _RDPConnectionPageState();
 }
 
+/// RDP 연결 정보
+class RDPConnection {
+  final int pid;
+  final String rdpFilePath;
+  final DateTime connectedAt;
+
+  RDPConnection({
+    required this.pid,
+    required this.rdpFilePath,
+    required this.connectedAt,
+  });
+}
+
 class _RDPConnectionPageState extends State<RDPConnectionPage> {
   final _formKey = GlobalKey<FormState>();
   final _serverController = TextEditingController(text: "192.168.136.136");
@@ -28,12 +41,11 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
 
   bool _isConnecting = false;
   String _connectionStatus = '';
-  int? _windowsAppPid;
-  String? _rdpFilePath;
+  final List<RDPConnection> _activeConnections = [];
   final List<CapturedImage> _capturedImages = [];
 
-  /// 검증된 RDP 메인 창 ID 목록 (앱 전체에서 공유)
-  static final Set<int> _verifiedWindowIds = {};
+  /// 검증된 RDP 메인 창 정보 (rdpFileName + windowId 조합)
+  static final Map<String, int> _verifiedWindows = {};
 
   @override
   void dispose() {
@@ -110,11 +122,14 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
         return;
       }
 
-      // 5. 성공
+      // 5. 성공 - 연결 목록에 추가
       setState(() {
-        _windowsAppPid = pid;
-        _rdpFilePath = rdpFilePath;
-        _connectionStatus = '✅ Connected! Windows App PID: $pid';
+        _activeConnections.add(RDPConnection(
+          pid: pid,
+          rdpFilePath: rdpFilePath,
+          connectedAt: DateTime.now(),
+        ));
+        _connectionStatus = '✅ Connected! Windows App PID: $pid (총 ${_activeConnections.length}개 연결)';
         _isConnecting = false;
       });
 
@@ -263,20 +278,31 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
             if (_connectionStatus.isNotEmpty)
               StatusMessage(message: _connectionStatus),
             const SizedBox(height: 16),
-            if (_windowsAppPid != null)
-              PidWindowsList(
-                pid: _windowsAppPid!,
-                rdpFilePath: _rdpFilePath,
-                onCloseWindow: _closeWindowById,
-                onCaptureWindow: _captureWindowById,
-                verifiedWindowIds: _verifiedWindowIds,
-                onWindowVerified: (windowId) {
-                  setState(() {
-                    _verifiedWindowIds.add(windowId);
-                    _connectionStatus = '✅ RDP 메인 창 검증 완료! (Window ID: $windowId)';
-                  });
-                },
-              ),
+            // 모든 활성 연결에 대한 PidWindowsList 표시
+            ..._activeConnections.map((connection) => Column(
+              children: [
+                PidWindowsList(
+                  pid: connection.pid,
+                  rdpFilePath: connection.rdpFilePath,
+                  onCloseWindow: _closeWindowById,
+                  onCaptureWindow: _captureWindowById,
+                  verifiedWindows: _verifiedWindows,
+                  onWindowVerified: (rdpFileName, windowId) {
+                    setState(() {
+                      _verifiedWindows[rdpFileName] = windowId;
+                      _connectionStatus = '✅ RDP 메인 창 검증 완료! (Window ID: $windowId)';
+                    });
+                  },
+                  onConnectionClosed: () {
+                    setState(() {
+                      _activeConnections.remove(connection);
+                      _connectionStatus = 'RDP 연결 종료됨 (남은 연결: ${_activeConnections.length}개)';
+                    });
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+            )),
             if (_capturedImages.isNotEmpty) ...[
               const SizedBox(height: 16),
               Card(
