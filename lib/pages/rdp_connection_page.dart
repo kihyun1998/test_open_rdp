@@ -1,15 +1,12 @@
-import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
 import '../models/captured_image.dart';
-import '../models/connection_result.dart';
-import '../models/rdp_connection.dart';
 import '../services/rdp_service.dart';
 import '../services/window_manager_service.dart';
 import '../utils/error_utils.dart';
 import '../widgets/connection_form.dart';
-import '../widgets/connection_list.dart';
 import '../widgets/pid_windows_list.dart';
 import '../widgets/status_message.dart';
 
@@ -22,7 +19,7 @@ class RDPConnectionPage extends StatefulWidget {
 
 class _RDPConnectionPageState extends State<RDPConnectionPage> {
   final _formKey = GlobalKey<FormState>();
-  final _serverController = TextEditingController(text: "192.168.136.134");
+  final _serverController = TextEditingController(text: "192.168.136.136");
   final _usernameController = TextEditingController(text: "Administrator");
   final _passwordController = TextEditingController();
   final _portController = TextEditingController(text: '3389');
@@ -30,11 +27,8 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   final _windowManager = WindowManagerService();
 
   bool _isConnecting = false;
-  bool _isRefreshing = false;
-  bool _autoRefreshEnabled = false;
   String _connectionStatus = '';
-  List<RDPConnection> _activeConnections = [];
-  Timer? _autoRefreshTimer;
+  int? _windowsAppPid;
   final List<CapturedImage> _capturedImages = [];
 
   @override
@@ -43,30 +37,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
     _usernameController.dispose();
     _passwordController.dispose();
     _portController.dispose();
-    _autoRefreshTimer?.cancel();
     super.dispose();
-  }
-
-  void _toggleAutoRefresh() {
-    setState(() {
-      _autoRefreshEnabled = !_autoRefreshEnabled;
-    });
-
-    if (_autoRefreshEnabled) {
-      _autoRefreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-        if (mounted && _activeConnections.isNotEmpty) {
-          _refreshAllConnections();
-        }
-      });
-      setState(() {
-        _connectionStatus = 'Auto-refresh enabled (every 30 seconds)';
-      });
-    } else {
-      _autoRefreshTimer?.cancel();
-      setState(() {
-        _connectionStatus = 'Auto-refresh disabled';
-      });
-    }
   }
 
   Future<void> _connectRDP() async {
@@ -74,143 +45,103 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
 
     setState(() {
       _isConnecting = true;
-    });
-
-    final result = await _rdpService.connectRDP(
-      server: _serverController.text,
-      username: _usernameController.text,
-      password: _passwordController.text,
-      port: _portController.text,
-      onStatusUpdate: (status) {
-        if (mounted) {
-          setState(() {
-            _connectionStatus = status;
-          });
-        }
-      },
-    );
-
-    if (mounted) {
-      setState(() {
-        _isConnecting = false;
-
-        // 결과에 따른 상태 업데이트
-        switch (result.type) {
-          case ConnectionResultType.success:
-            if (result.connection != null) {
-              _activeConnections.add(result.connection!);
-            }
-            _connectionStatus = '✅ ${result.message}';
-            break;
-          case ConnectionResultType.existingFocused:
-            _connectionStatus = '🔄 ${result.message}';
-            break;
-          case ConnectionResultType.appError:
-            _connectionStatus = '⚠️ ${result.message}';
-            if (result.error != null) {
-              _connectionStatus += '\nError: ${result.error}';
-            }
-            break;
-          case ConnectionResultType.commandFailed:
-            _connectionStatus = '❌ ${result.message}';
-            if (result.error != null) {
-              _connectionStatus += '\nError: ${result.error}';
-            }
-            break;
-          case ConnectionResultType.appNotFound:
-            _connectionStatus = '🚫 ${result.message}';
-            if (result.error != null) {
-              _connectionStatus += '\n${result.error}';
-            }
-            break;
-        }
-      });
-    }
-  }
-
-  Future<void> _killConnection(RDPConnection connection) async {
-    try {
-      await _rdpService.killConnection(connection);
-      setState(() {
-        _activeConnections.remove(connection);
-        _connectionStatus = 'Connection terminated (PID: ${connection.pid})';
-      });
-    } catch (e) {
-      setState(() {
-        _connectionStatus = 'Error terminating connection: $e';
-      });
-    }
-  }
-
-  Future<void> _refreshAllConnections() async {
-    if (_isRefreshing) return;
-
-    setState(() {
-      _isRefreshing = true;
-      _connectionStatus = 'Refreshing all connections...';
+      _connectionStatus = 'Checking Windows App installation...';
     });
 
     try {
-      final List<RDPConnection> updatedConnections = [];
-
-      for (final connection in _activeConnections) {
-        // RDP 파일명으로 실제 창 찾기
-        final foundConnection = await _rdpService.findAndUpdateConnection(
-          connection,
-        );
-
-        if (foundConnection != null) {
-          updatedConnections.add(foundConnection);
-        }
-        // 찾지 못한 경우 목록에서 제거
+      // 1. Windows App 설치 확인
+      final isInstalled = await _rdpService.isWindowsAppInstalled();
+      if (!isInstalled) {
+        setState(() {
+          _connectionStatus = '🚫 Windows App is not installed';
+          _isConnecting = false;
+        });
+        return;
       }
 
+      // 2. RDP 파일 생성
       setState(() {
-        _activeConnections = updatedConnections;
-        _connectionStatus =
-            'Refresh completed. Found ${updatedConnections.length} active connections.';
-        _isRefreshing = false;
+        _connectionStatus = 'Creating RDP file...';
       });
-    } catch (e) {
-      setState(() {
-        _connectionStatus = 'Refresh failed: $e';
-        _isRefreshing = false;
-      });
-    }
-  }
 
-  Future<void> _refreshSingleConnection(int index) async {
-    if (index >= _activeConnections.length) return;
-
-    final connection = _activeConnections[index];
-    setState(() {
-      _connectionStatus = 'Refreshing connection to ${connection.server}...';
-    });
-
-    try {
-      // RDP 파일명으로 실제 창 찾기
-      final foundConnection = await _rdpService.findAndUpdateConnection(
-        connection,
+      final rdpFilePath = await _rdpService.createRdpFile(
+        server: _serverController.text,
+        username: _usernameController.text,
+        password: _passwordController.text,
+        port: _portController.text,
       );
 
-      if (foundConnection != null) {
+      // 3. Windows App 실행
+      setState(() {
+        _connectionStatus = 'Starting Windows App...';
+      });
+
+      final result = await Process.run('open', [
+        '-a',
+        'Windows App',
+        rdpFilePath,
+      ]);
+
+      if (result.exitCode != 0) {
         setState(() {
-          _activeConnections[index] = foundConnection;
           _connectionStatus =
-              'Connection to ${connection.server} updated (Window ID: ${foundConnection.windowId})';
+              '❌ Failed to launch Windows App: ${result.stderr}';
+          _isConnecting = false;
         });
-      } else {
-        setState(() {
-          _activeConnections.removeAt(index);
-          _connectionStatus =
-              'Connection to ${connection.server} removed (window not found)';
-        });
+        return;
       }
+
+      // 4. Windows App PID 대기
+      setState(() {
+        _connectionStatus = 'Waiting for Windows App to launch...';
+      });
+
+      final pid = await _waitForWindowsAppPid();
+
+      if (pid == null) {
+        setState(() {
+          _connectionStatus = '⚠️ Failed to find Windows App process';
+          _isConnecting = false;
+        });
+        return;
+      }
+
+      // 5. 성공
+      setState(() {
+        _windowsAppPid = pid;
+        _connectionStatus = '✅ Connected! Windows App PID: $pid';
+        _isConnecting = false;
+      });
+
+      // 6. 임시 파일 정리 (1분 후)
+      Future.delayed(const Duration(minutes: 1), () {
+        final file = File(rdpFilePath);
+        if (file.existsSync()) {
+          file.delete();
+        }
+      });
     } catch (e) {
       setState(() {
-        _connectionStatus = 'Failed to refresh connection: $e';
+        _connectionStatus = '❌ Connection failed: $e';
+        _isConnecting = false;
       });
     }
+  }
+
+  /// Windows App PID를 찾을 때까지 대기 (최대 10초)
+  Future<int?> _waitForWindowsAppPid() async {
+    for (int attempt = 1; attempt <= 10; attempt++) {
+      final result = await Process.run('pgrep', ['-x', 'Windows App']);
+      if (result.exitCode == 0) {
+        final pidStr = result.stdout.toString().trim();
+        final pid = int.tryParse(pidStr);
+        if (pid != null) {
+          return pid;
+        }
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    return null;
   }
 
   Future<void> _closeWindowById(int windowId) async {
@@ -249,9 +180,6 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                 : 'Window ID $windowId successfully closed';
           });
         }
-
-        // 연결 목록 새로고침
-        await _refreshAllConnections();
       } else {
         if (mounted && !closeResult.isSuccess) {
           ErrorUtils.showErrorDialog(context, '창 닫기 실패', closeResult.error!);
@@ -330,135 +258,74 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
             if (_connectionStatus.isNotEmpty)
               StatusMessage(message: _connectionStatus),
             const SizedBox(height: 16),
-            if (_activeConnections.isNotEmpty) ...[
-              ConnectionList(
-                connections: _activeConnections,
-                isRefreshing: _isRefreshing,
-                autoRefreshEnabled: _autoRefreshEnabled,
-                onRefreshAll: _refreshAllConnections,
-                onToggleAutoRefresh: _toggleAutoRefresh,
-                onRefreshSingle: _refreshSingleConnection,
-                onCheckStatus: (windowId) async {
-                  final connection = _activeConnections.firstWhere(
-                    (c) => c.windowId == windowId,
-                  );
-                  final result = await _windowManager.isWindowAlive(
-                    connection.windowId,
-                  );
-                  if (mounted) {
-                    setState(() {
-                      if (result.isSuccess) {
-                        _connectionStatus = (result.data == true)
-                            ? 'Window ID $windowId is active'
-                            : 'Window ID $windowId is not active';
-                      } else {
-                        ErrorUtils.showErrorSnackBar(
-                          context,
-                          '창 상태 확인 실패: ${result.error?.message}',
-                        );
-                        _connectionStatus =
-                            'Error checking status: ${result.error}';
-                      }
-                    });
-                  }
-                },
-                onKillConnection: _killConnection,
+            if (_windowsAppPid != null)
+              PidWindowsList(
+                pid: _windowsAppPid!,
+                onCloseWindow: _closeWindowById,
+                onCaptureWindow: _captureWindowById,
               ),
+            if (_capturedImages.isNotEmpty) ...[
               const SizedBox(height: 16),
-              // PID의 모든 창들 표시
-              ...(_activeConnections
-                  .map((connection) => connection.pid)
-                  .toSet()
-                  .map(
-                    (pid) => PidWindowsList(
-                      pid: pid,
-                      connections: _activeConnections
-                          .where((conn) => conn.pid == pid)
-                          .toList(),
-                      onCloseWindow: _closeWindowById,
-                      onCaptureWindow: _captureWindowById,
-                    ),
-                  )),
-              if (_capturedImages.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '캡처된 이미지 (${_capturedImages.length}개)',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '캡처된 이미지 (${_capturedImages.length}개)',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 200,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _capturedImages.length,
-                            itemBuilder: (context, index) {
-                              final image = _capturedImages[index];
-                              return Container(
-                                margin: const EdgeInsets.only(right: 8),
-                                child: Column(
-                                  children: [
-                                    Expanded(
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Image.memory(
-                                          image.imageData,
-                                          fit: BoxFit.cover,
-                                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 200,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _capturedImages.length,
+                          itemBuilder: (context, index) {
+                            final image = _capturedImages[index];
+                            return Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              child: Column(
+                                children: [
+                                  Expanded(
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.memory(
+                                        image.imageData,
+                                        fit: BoxFit.cover,
                                       ),
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Window ${image.windowId}',
-                                      style: const TextStyle(fontSize: 12),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Window ${image.windowId}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  Text(
+                                    '${image.capturedAt.hour}:${image.capturedAt.minute.toString().padLeft(2, '0')}',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey.shade600,
                                     ),
-                                    Text(
-                                      '${image.capturedAt.hour}:${image.capturedAt.minute.toString().padLeft(2, '0')}',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ],
           ],
         ),
       ),
-      floatingActionButton: _activeConnections.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: _isRefreshing ? null : _refreshAllConnections,
-              tooltip: 'Quick Refresh All',
-              backgroundColor: _isRefreshing ? Colors.grey : Colors.blue,
-              child: _isRefreshing
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Icon(Icons.refresh),
-            )
-          : null,
     );
   }
 }
