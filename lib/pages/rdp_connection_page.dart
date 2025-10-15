@@ -29,6 +29,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   bool _isConnecting = false;
   String _connectionStatus = '';
   int? _windowsAppPid;
+  String? _rdpFilePath;
   final List<CapturedImage> _capturedImages = [];
 
   @override
@@ -109,6 +110,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
       // 5. 성공
       setState(() {
         _windowsAppPid = pid;
+        _rdpFilePath = rdpFilePath;
         _connectionStatus = '✅ Connected! Windows App PID: $pid';
         _isConnecting = false;
       });
@@ -261,6 +263,7 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
             if (_windowsAppPid != null)
               PidWindowsList(
                 pid: _windowsAppPid!,
+                rdpFilePath: _rdpFilePath,
                 onCloseWindow: _closeWindowById,
                 onCaptureWindow: _captureWindowById,
               ),

@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as path;
 
-import '../models/rdp_connection.dart';
 import '../services/pid_windows_manager.dart';
 import '../services/window_manager_service.dart';
 
 class PidWindowsList extends StatefulWidget {
   final int pid;
+  final String? rdpFilePath;
   final Function(int) onCloseWindow;
   final Function(int) onCaptureWindow;
-  final List<RDPConnection> connections;
 
   const PidWindowsList({
     super.key,
     required this.pid,
+    this.rdpFilePath,
     required this.onCloseWindow,
     required this.onCaptureWindow,
-    this.connections = const [],
   });
 
   @override
@@ -57,6 +57,10 @@ class _PidWindowsListState extends State<PidWindowsList> {
   Widget _buildHeader() {
     final displayedWindows = _getDisplayedWindows();
     final totalWindows = _windows.length;
+    final isFiltered = widget.rdpFilePath != null;
+    final rdpFileName = isFiltered
+        ? path.basenameWithoutExtension(widget.rdpFilePath!)
+        : null;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -65,7 +69,9 @@ class _PidWindowsListState extends State<PidWindowsList> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'PID ${widget.pid}의 모든 창들',
+              isFiltered
+                  ? 'RDP 연결: $rdpFileName'
+                  : 'PID ${widget.pid}의 모든 창들',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             if (_lastUpdate != null)
@@ -79,27 +85,30 @@ class _PidWindowsListState extends State<PidWindowsList> {
           children: [
             if (_windows.isNotEmpty)
               Text(
-                _filterRdpOnly
-                    ? '${displayedWindows.length}개 RDP 연결창 ($totalWindows개 중)'
-                    : '$totalWindows개 창',
+                isFiltered
+                    ? '${displayedWindows.length}개 창 (총 $totalWindows개 중)'
+                    : (_filterRdpOnly
+                        ? '${displayedWindows.length}개 RDP 연결창 ($totalWindows개 중)'
+                        : '$totalWindows개 창'),
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               ),
             const SizedBox(width: 8),
-            IconButton(
-              onPressed: () => setState(() => _filterRdpOnly = !_filterRdpOnly),
-              icon: Icon(
-                _filterRdpOnly ? Icons.filter_alt : Icons.filter_alt_off,
+            if (!isFiltered)
+              IconButton(
+                onPressed: () => setState(() => _filterRdpOnly = !_filterRdpOnly),
+                icon: Icon(
+                  _filterRdpOnly ? Icons.filter_alt : Icons.filter_alt_off,
+                ),
+                tooltip: _filterRdpOnly ? 'RDP 연결창만 표시 중' : '모든 창 표시 중',
+                style: IconButton.styleFrom(
+                  backgroundColor: _filterRdpOnly
+                      ? Colors.blue.shade50
+                      : Colors.grey.shade100,
+                  foregroundColor: _filterRdpOnly
+                      ? Colors.blue.shade700
+                      : Colors.grey.shade700,
+                ),
               ),
-              tooltip: _filterRdpOnly ? 'RDP 연결창만 표시 중' : '모든 창 표시 중',
-              style: IconButton.styleFrom(
-                backgroundColor: _filterRdpOnly
-                    ? Colors.blue.shade50
-                    : Colors.grey.shade100,
-                foregroundColor: _filterRdpOnly
-                    ? Colors.blue.shade700
-                    : Colors.grey.shade700,
-              ),
-            ),
             const SizedBox(width: 8),
             PopupMenuButton<String>(
               onSelected: (value) {
@@ -294,11 +303,20 @@ class _PidWindowsListState extends State<PidWindowsList> {
 
   /// Get the list of windows to display based on filter settings
   List<WindowInfo> _getDisplayedWindows() {
-    if (!_filterRdpOnly) {
-      return _windows;
+    // RDP 파일명이 있으면 해당 파일명이 포함된 창만 표시
+    if (widget.rdpFilePath != null) {
+      final rdpFileName = path.basenameWithoutExtension(widget.rdpFilePath!);
+      return _windows.where((window) {
+        return window.windowName.toLowerCase().contains(rdpFileName.toLowerCase());
+      }).toList();
     }
 
-    return _manager.filterRdpWindows(_windows, widget.connections);
+    // 필터가 활성화되면 RDP 연결창만 표시
+    if (_filterRdpOnly) {
+      return _manager.filterRdpWindows(_windows);
+    }
+
+    return _windows;
   }
 
   Future<void> _refreshWindows() async {

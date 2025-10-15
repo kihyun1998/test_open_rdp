@@ -1,8 +1,6 @@
 import 'dart:io';
 
-import '../models/rdp_connection.dart';
 import '../services/window_manager_service.dart';
-import '../utils/rdp_utils.dart';
 
 /// Business logic for managing windows by PID
 class PidWindowsManager {
@@ -30,25 +28,9 @@ class PidWindowsManager {
   }
 
   /// Filters windows to show only RDP connection windows
-  List<WindowInfo> filterRdpWindows(
-    List<WindowInfo> windows,
-    List<RDPConnection> connections,
-  ) {
-    // Extract RDP file names from connections
-    final rdpFileNames = connections
-        .map((conn) => RdpUtils.extractRdpFileName(conn.rdpFilePath))
-        .where((name) => name.isNotEmpty)
-        .toList();
-
-    if (rdpFileNames.isEmpty) {
-      return windows;
-    }
-
-    // Filter windows that match RDP file names
-    return windows
-        .where((window) =>
-            RdpUtils.isMatchingRdpWindow(window.windowName, rdpFileNames))
-        .toList();
+  List<WindowInfo> filterRdpWindows(List<WindowInfo> windows) {
+    // RDP windows start with "connection_" pattern
+    return windows.where((window) => isRdpConnectionWindow(window)).toList();
   }
 
   /// Checks if a window is an RDP connection window
@@ -70,8 +52,8 @@ class PidWindowsManager {
     return windows
         .where(
           (window) => window.windowName.toLowerCase().contains(
-                namePattern.toLowerCase(),
-              ),
+            namePattern.toLowerCase(),
+          ),
         )
         .toList();
   }
@@ -187,24 +169,14 @@ class PidWindowsResult {
   final String? error;
   final bool isSuccess;
 
-  PidWindowsResult._({
-    this.windows,
-    this.error,
-    required this.isSuccess,
-  });
+  PidWindowsResult._({this.windows, this.error, required this.isSuccess});
 
   factory PidWindowsResult.success(List<WindowInfo> windows) {
-    return PidWindowsResult._(
-      windows: windows,
-      isSuccess: true,
-    );
+    return PidWindowsResult._(windows: windows, isSuccess: true);
   }
 
   factory PidWindowsResult.error(String error) {
-    return PidWindowsResult._(
-      error: error,
-      isSuccess: false,
-    );
+    return PidWindowsResult._(error: error, isSuccess: false);
   }
 }
 
@@ -213,10 +185,7 @@ class WindowChanges {
   final List<int> newWindowIds;
   final List<int> removedWindowIds;
 
-  WindowChanges({
-    required this.newWindowIds,
-    required this.removedWindowIds,
-  });
+  WindowChanges({required this.newWindowIds, required this.removedWindowIds});
 
   bool get hasChanges => newWindowIds.isNotEmpty || removedWindowIds.isNotEmpty;
 }
@@ -226,8 +195,5 @@ class WindowPatternInfo {
   final String name;
   final String description;
 
-  WindowPatternInfo({
-    required this.name,
-    required this.description,
-  });
+  WindowPatternInfo({required this.name, required this.description});
 }

@@ -213,8 +213,6 @@ class WindowManagerService {
         return '이미 캡처가 진행 중입니다';
       case CaptureFailureReason.windowNotCapturable:
         return '캡처할 수 없는 창입니다';
-      default:
-        return '알 수 없는 오류가 발생했습니다';
     }
   }
 }
