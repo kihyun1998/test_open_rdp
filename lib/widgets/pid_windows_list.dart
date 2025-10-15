@@ -1,19 +1,21 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
+import '../models/rdp_connection.dart';
+import '../services/pid_windows_manager.dart';
 import '../services/window_manager_service.dart';
 
 class PidWindowsList extends StatefulWidget {
   final int pid;
   final Function(int) onCloseWindow;
   final Function(int) onCaptureWindow;
+  final List<RDPConnection> connections;
 
   const PidWindowsList({
     super.key,
     required this.pid,
     required this.onCloseWindow,
     required this.onCaptureWindow,
+    this.connections = const [],
   });
 
   @override
@@ -24,9 +26,10 @@ class _PidWindowsListState extends State<PidWindowsList> {
   List<WindowInfo> _windows = [];
   List<WindowInfo> _previousWindows = [];
   bool _isLoading = false;
+  bool _filterRdpOnly = false;
   String? _error;
   DateTime? _lastUpdate;
-  final WindowManagerService _windowManager = WindowManagerService();
+  final PidWindowsManager _manager = PidWindowsManager();
 
   @override
   void initState() {
@@ -52,6 +55,9 @@ class _PidWindowsListState extends State<PidWindowsList> {
   }
 
   Widget _buildHeader() {
+    final displayedWindows = _getDisplayedWindows();
+    final totalWindows = _windows.length;
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -73,9 +79,27 @@ class _PidWindowsListState extends State<PidWindowsList> {
           children: [
             if (_windows.isNotEmpty)
               Text(
-                '${_windows.length}개 창',
+                _filterRdpOnly
+                    ? '${displayedWindows.length}개 RDP 연결창 ($totalWindows개 중)'
+                    : '$totalWindows개 창',
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               ),
+            const SizedBox(width: 8),
+            IconButton(
+              onPressed: () => setState(() => _filterRdpOnly = !_filterRdpOnly),
+              icon: Icon(
+                _filterRdpOnly ? Icons.filter_alt : Icons.filter_alt_off,
+              ),
+              tooltip: _filterRdpOnly ? 'RDP 연결창만 표시 중' : '모든 창 표시 중',
+              style: IconButton.styleFrom(
+                backgroundColor: _filterRdpOnly
+                    ? Colors.blue.shade50
+                    : Colors.grey.shade100,
+                foregroundColor: _filterRdpOnly
+                    ? Colors.blue.shade700
+                    : Colors.grey.shade700,
+              ),
+            ),
             const SizedBox(width: 8),
             PopupMenuButton<String>(
               onSelected: (value) {
@@ -242,9 +266,39 @@ class _PidWindowsListState extends State<PidWindowsList> {
       );
     }
 
+    final displayedWindows = _getDisplayedWindows();
+
+    if (displayedWindows.isEmpty && _filterRdpOnly) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: Colors.blue.shade700),
+            const SizedBox(width: 8),
+            const Expanded(child: Text('RDP 연결창이 없습니다. 필터를 해제하여 모든 창을 확인하세요.')),
+          ],
+        ),
+      );
+    }
+
     return Column(
-      children: _windows.map((window) => _buildWindowCard(window)).toList(),
+      children: displayedWindows
+          .map((window) => _buildWindowCard(window))
+          .toList(),
     );
+  }
+
+  /// Get the list of windows to display based on filter settings
+  List<WindowInfo> _getDisplayedWindows() {
+    if (!_filterRdpOnly) {
+      return _windows;
+    }
+
+    return _manager.filterRdpWindows(_windows, widget.connections);
   }
 
   Future<void> _refreshWindows() async {
@@ -256,25 +310,22 @@ class _PidWindowsListState extends State<PidWindowsList> {
     try {
       _previousWindows = List.from(_windows);
 
-      final result = await _windowManager.getWindowsAppWindows();
+      final result = await _manager.getWindowsForPid(widget.pid);
 
-      if (result.isSuccess && result.data != null) {
-        final pidWindows = result.data!
-            .where((window) => window.ownerPID == widget.pid)
-            .toList();
+      if (result.isSuccess && result.windows != null) {
+        final pidWindows = result.windows!;
 
         // 변화 감지
-        final previousIds = _previousWindows.map((w) => w.windowId).toSet();
-        final currentIds = pidWindows.map((w) => w.windowId).toSet();
+        final changes = _manager.detectWindowChanges(
+          _previousWindows,
+          pidWindows,
+        );
 
-        final newWindows = currentIds.difference(previousIds);
-        final removedWindows = previousIds.difference(currentIds);
-
-        if (newWindows.isNotEmpty) {
-          print('🆕 New windows: ${newWindows.toList()}');
+        if (changes.newWindowIds.isNotEmpty) {
+          print('🆕 New windows: ${changes.newWindowIds}');
         }
-        if (removedWindows.isNotEmpty) {
-          print('❌ Removed windows: ${removedWindows.toList()}');
+        if (changes.removedWindowIds.isNotEmpty) {
+          print('❌ Removed windows: ${changes.removedWindowIds}');
         }
 
         setState(() {
@@ -284,7 +335,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
         });
       } else {
         setState(() {
-          _error = result.error?.toString() ?? 'Unknown error occurred';
+          _error = result.error ?? 'Unknown error occurred';
           _isLoading = false;
         });
       }
@@ -298,8 +349,8 @@ class _PidWindowsListState extends State<PidWindowsList> {
   }
 
   Widget _buildWindowCard(WindowInfo window) {
-    final isNew = _isNewWindow(window.windowId);
-    final isRdpConnection = _isRdpConnectionWindow(window);
+    final isNew = _manager.isNewWindow(window.windowId, _previousWindows);
+    final isRdpConnection = _manager.isRdpConnectionWindow(window);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -347,7 +398,8 @@ class _PidWindowsListState extends State<PidWindowsList> {
                   ),
                 ),
               ),
-            if (_getWindowPriority(window) == 'Main' && !isRdpConnection)
+            if (_manager.getWindowPriority(window) == 'Main' &&
+                !isRdpConnection)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -416,7 +468,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
 
   Widget _buildWindowDetailsDialog(WindowInfo window) {
     final area = window.width * window.height;
-    final priority = _getWindowPriority(window);
+    final priority = _manager.getWindowPriority(window);
     final aspectRatio = window.height != 0 ? window.width / window.height : 0;
 
     return Dialog(
@@ -536,7 +588,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
                     _buildDetailRow('레이어 레벨', '${window.layer}'),
                     _buildDetailRow(
                       '공유 상태',
-                      _getSharingStateDescription(window.sharingState),
+                      _manager.getSharingStateDescription(window.sharingState),
                     ),
                     const Divider(height: 24),
                     Text(
@@ -550,7 +602,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
                     const SizedBox(height: 8),
                     _buildDetailRow(
                       '메모리 사용량',
-                      _formatMemoryUsage(window.memoryUsage),
+                      _manager.formatMemoryUsage(window.memoryUsage),
                     ),
                     _buildDetailRow(
                       '비디오 메모리',
@@ -568,8 +620,14 @@ class _PidWindowsListState extends State<PidWindowsList> {
                     ),
                     const SizedBox(height: 8),
                     _buildDetailRow('창 우선순위', priority),
-                    _buildDetailRow('창 유형', _getWindowTypeDescription(area)),
-                    if (_isNewWindow(window.windowId)) ...[
+                    _buildDetailRow(
+                      '창 유형',
+                      _manager.getWindowTypeDescription(area),
+                    ),
+                    if (_manager.isNewWindow(
+                      window.windowId,
+                      _previousWindows,
+                    )) ...[
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.all(8),
@@ -667,43 +725,8 @@ class _PidWindowsListState extends State<PidWindowsList> {
     );
   }
 
-  String _getWindowTypeDescription(double area) {
-    if (area > 500000) return '메인 창 (대형)';
-    if (area > 100000) return '다이얼로그 창 (중형)';
-    return 'UI 요소 창 (소형)';
-  }
-
-  String _getSharingStateDescription(int sharingState) {
-    switch (sharingState) {
-      case 0:
-        return '🚫 공유 없음 (None)';
-      case 1:
-        return '👁️ 읽기 전용 (ReadOnly)';
-      case 2:
-        return '✏️ 읽기/쓰기 (ReadWrite)';
-      default:
-        return '❓ 알 수 없음 ($sharingState)';
-    }
-  }
-
-  String _formatMemoryUsage(int bytes) {
-    if (bytes == 0) return '정보 없음';
-    if (bytes < 1024) return '$bytes bytes';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024)
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
-
-  bool _isRdpConnectionWindow(WindowInfo window) {
-    return window.windowName.startsWith('connection_') &&
-        window.windowName.contains(RegExp(r'connection_\d+'));
-  }
-
   Future<void> _closeAllNonRdpWindows() async {
-    final nonRdpWindows = _windows
-        .where((window) => !_isRdpConnectionWindow(window))
-        .toList();
+    final nonRdpWindows = _manager.getNonRdpWindows(_windows);
 
     if (nonRdpWindows.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -809,13 +832,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
   }
 
   Future<void> _closeWindowsByName(String namePattern) async {
-    final matchingWindows = _windows
-        .where(
-          (window) => window.windowName.toLowerCase().contains(
-            namePattern.toLowerCase(),
-          ),
-        )
-        .toList();
+    final matchingWindows = _manager.filterWindowsByName(_windows, namePattern);
 
     if (matchingWindows.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1025,7 +1042,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
         print('🛑 Terminating process PID: ${widget.pid}');
 
         // kill -TERM 명령어로 프로세스 정상 종료
-        final result = await Process.run('kill', ['-TERM', '${widget.pid}']);
+        final result = await _manager.terminateProcess(widget.pid);
 
         if (result.exitCode == 0) {
           if (mounted) {
@@ -1144,7 +1161,7 @@ class _PidWindowsListState extends State<PidWindowsList> {
         print('💀 Force quitting process PID: ${widget.pid}');
 
         // kill -9 명령어로 프로세스 강제 종료
-        final result = await Process.run('kill', ['-9', '${widget.pid}']);
+        final result = await _manager.forceQuitProcess(widget.pid);
 
         if (result.exitCode == 0) {
           if (mounted) {
@@ -1184,18 +1201,6 @@ class _PidWindowsListState extends State<PidWindowsList> {
         }
       }
     }
-  }
-
-  bool _isNewWindow(int windowId) {
-    if (_previousWindows.isEmpty) return false;
-    return !_previousWindows.any((w) => w.windowId == windowId);
-  }
-
-  String _getWindowPriority(WindowInfo window) {
-    final area = window.width * window.height;
-    if (area > 500000) return 'Main';
-    if (area > 100000) return 'Dialog';
-    return 'UI';
   }
 
   Color _getWindowColor(WindowInfo window) {
