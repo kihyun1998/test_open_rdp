@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as path;
 
@@ -9,6 +11,8 @@ class PidWindowsList extends StatefulWidget {
   final String? rdpFilePath;
   final Function(int) onCloseWindow;
   final Function(int) onCaptureWindow;
+  final Set<int> verifiedWindowIds;
+  final Function(int) onWindowVerified;
 
   const PidWindowsList({
     super.key,
@@ -16,6 +20,8 @@ class PidWindowsList extends StatefulWidget {
     this.rdpFilePath,
     required this.onCloseWindow,
     required this.onCaptureWindow,
+    required this.verifiedWindowIds,
+    required this.onWindowVerified,
   });
 
   @override
@@ -30,11 +36,93 @@ class _PidWindowsListState extends State<PidWindowsList> {
   String? _error;
   DateTime? _lastUpdate;
   final PidWindowsManager _manager = PidWindowsManager();
+  final WindowManagerService _windowManager = WindowManagerService();
+
+  // 전체화면 검증을 위한 변수
+  Timer? _verificationTimer;
+  ScreenInfo? _screenInfo;
+  bool _isVerifying = false;
 
   @override
   void initState() {
     super.initState();
+    _initScreenInfo();
     _refreshWindows();
+  }
+
+  @override
+  void dispose() {
+    _verificationTimer?.cancel();
+    super.dispose();
+  }
+
+  /// macOS 화면 해상도 초기화
+  Future<void> _initScreenInfo() async {
+    try {
+      final result = await _windowManager.getScreenResolution();
+      if (result.isSuccess && result.data != null) {
+        setState(() {
+          _screenInfo = result.data;
+        });
+        print('📺 Screen resolution detected: ${_screenInfo}');
+        // 화면 해상도를 얻은 후 검증 시작
+        _startVerification();
+      } else {
+        print('❌ Failed to get screen resolution: ${result.error}');
+      }
+    } catch (e) {
+      print('❌ Error getting screen resolution: $e');
+    }
+  }
+
+  /// 전체화면 창 검증 시작 (200ms 간격)
+  void _startVerification() {
+    if (_screenInfo == null) return;
+
+    _isVerifying = true;
+    print('🔍 Starting RDP main window verification...');
+
+    _verificationTimer = Timer.periodic(
+      const Duration(milliseconds: 200),
+      (timer) async {
+        await _checkForFullScreenWindow();
+      },
+    );
+  }
+
+  /// 전체화면 창 체크
+  Future<void> _checkForFullScreenWindow() async {
+    if (_screenInfo == null) return;
+
+    try {
+      final displayedWindows = _getDisplayedWindows();
+
+      for (final window in displayedWindows) {
+        // 이미 검증된 창은 스킵
+        if (widget.verifiedWindowIds.contains(window.windowId)) {
+          continue;
+        }
+
+        // 전체화면 체크
+        if (_manager.isFullScreenWindow(window, _screenInfo!)) {
+          print('✅ Full screen RDP window detected: ${window.windowId}');
+          print('   Window size: ${window.width}x${window.height}');
+          print('   Screen size: ${_screenInfo!.width}x${_screenInfo!.height}');
+
+          // 검증 완료 처리
+          widget.onWindowVerified(window.windowId);
+
+          // 폴링 중지
+          _verificationTimer?.cancel();
+          setState(() {
+            _isVerifying = false;
+          });
+          return;
+        }
+      }
+    } catch (e) {
+      print('❌ Error checking full screen window: $e');
+    }
   }
 
   @override
@@ -61,6 +149,9 @@ class _PidWindowsListState extends State<PidWindowsList> {
     final rdpFileName = isFiltered
         ? path.basenameWithoutExtension(widget.rdpFilePath!)
         : null;
+    final verifiedCount = displayedWindows
+        .where((w) => widget.verifiedWindowIds.contains(w.windowId))
+        .length;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -68,16 +159,58 @@ class _PidWindowsListState extends State<PidWindowsList> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              isFiltered
-                  ? 'RDP 연결: $rdpFileName'
-                  : 'PID ${widget.pid}의 모든 창들',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                Text(
+                  isFiltered
+                      ? 'RDP 연결: $rdpFileName'
+                      : 'PID ${widget.pid}의 모든 창들',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                if (_isVerifying) ...[
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.orange.shade700,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '검증 중...',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange.shade700,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+                if (verifiedCount > 0) ...[
+                  const SizedBox(width: 8),
+                  Icon(Icons.verified, color: Colors.green.shade700, size: 16),
+                  const SizedBox(width: 4),
+                  Text(
+                    '검증됨',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.green.shade700,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ],
             ),
             if (_lastUpdate != null)
               Text(
                 '마지막 업데이트: ${_formatTime(_lastUpdate!)}',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            if (_screenInfo != null)
+              Text(
+                '화면 해상도: ${_screenInfo!.width.toInt()}x${_screenInfo!.height.toInt()}',
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
               ),
           ],
         ),
@@ -227,6 +360,67 @@ class _PidWindowsListState extends State<PidWindowsList> {
   }
 
   Widget _buildContent() {
+    // 검증 중 상태 표시
+    if (_isVerifying && _screenInfo != null) {
+      return Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.orange.shade700,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '전체화면 RDP 메인 창 검증 중...',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '현재 화면 해상도: ${_screenInfo!.width.toInt()}x${_screenInfo!.height.toInt()}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange.shade700,
+                        ),
+                      ),
+                      Text(
+                        '이 크기와 일치하는 창을 찾는 중입니다 (200ms 간격)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.orange.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 검증 중에도 창 목록 표시
+          ..._buildWindowList(),
+        ],
+      );
+    }
+
     if (_isLoading && _windows.isEmpty) {
       return const Center(
         child: Padding(
@@ -294,11 +488,13 @@ class _PidWindowsListState extends State<PidWindowsList> {
       );
     }
 
-    return Column(
-      children: displayedWindows
-          .map((window) => _buildWindowCard(window))
-          .toList(),
-    );
+    return Column(children: _buildWindowList());
+  }
+
+  /// 창 목록 위젯 생성
+  List<Widget> _buildWindowList() {
+    final displayedWindows = _getDisplayedWindows();
+    return displayedWindows.map((window) => _buildWindowCard(window)).toList();
   }
 
   /// Get the list of windows to display based on filter settings
@@ -369,19 +565,29 @@ class _PidWindowsListState extends State<PidWindowsList> {
   Widget _buildWindowCard(WindowInfo window) {
     final isNew = _manager.isNewWindow(window.windowId, _previousWindows);
     final isRdpConnection = _manager.isRdpConnectionWindow(window);
+    final isVerified = widget.verifiedWindowIds.contains(window.windowId);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       elevation: isNew ? 4 : 2,
-      color: isNew
-          ? Colors.green.shade50
-          : (isRdpConnection ? Colors.blue.shade50 : null),
+      color: isVerified
+          ? Colors.green.shade100
+          : (isNew
+              ? Colors.green.shade50
+              : (isRdpConnection ? Colors.blue.shade50 : null)),
       child: ListTile(
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.window, color: _getWindowColor(window)),
-            if (isRdpConnection) ...[
+            Icon(
+              Icons.window,
+              color: isVerified ? Colors.green.shade700 : _getWindowColor(window),
+            ),
+            if (isVerified) ...[
+              const SizedBox(width: 4),
+              Icon(Icons.verified, color: Colors.green.shade700, size: 20),
+            ],
+            if (isRdpConnection && !isVerified) ...[
               const SizedBox(width: 4),
               Icon(Icons.shield, color: Colors.blue.shade700, size: 16),
             ],
@@ -389,13 +595,44 @@ class _PidWindowsListState extends State<PidWindowsList> {
               const SizedBox(width: 4),
               Icon(Icons.fiber_new, color: Colors.green.shade700, size: 16),
             ],
+            if (_isVerifying && !isVerified) ...[
+              const SizedBox(width: 4),
+              SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+            ],
           ],
         ),
         title: Text('Window ID: ${window.windowId}'),
-        subtitle: Text(
-          'Size: ${window.width.toInt()}x${window.height.toInt()}\n'
-          'Position: (${window.x.toInt()}, ${window.y.toInt()})\n'
-          'Name: "${window.windowName.isEmpty ? "No Name" : window.windowName}"',
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Size: ${window.width.toInt()}x${window.height.toInt()}',
+              style: TextStyle(
+                fontWeight: isVerified ? FontWeight.bold : FontWeight.normal,
+                color: isVerified ? Colors.green.shade700 : null,
+              ),
+            ),
+            if (_screenInfo != null && _isVerifying)
+              Text(
+                '목표: ${_screenInfo!.width.toInt()}x${_screenInfo!.height.toInt()} ${window.width == _screenInfo!.width && window.height == _screenInfo!.height ? "✅ 일치!" : ""}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: (window.width == _screenInfo!.width && window.height == _screenInfo!.height)
+                      ? Colors.green.shade700
+                      : Colors.orange.shade700,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            Text('Position: (${window.x.toInt()}, ${window.y.toInt()})'),
+            Text('Name: "${window.windowName.isEmpty ? "No Name" : window.windowName}"'),
+          ],
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,

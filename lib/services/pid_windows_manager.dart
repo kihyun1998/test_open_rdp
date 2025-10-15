@@ -39,6 +39,12 @@ class PidWindowsManager {
         window.windowName.contains(RegExp(r'connection_\d+'));
   }
 
+  /// Checks if a window is in full screen mode (matches screen resolution)
+  bool isFullScreenWindow(WindowInfo window, ScreenInfo screenInfo) {
+    return window.width == screenInfo.width &&
+        window.height == screenInfo.height;
+  }
+
   /// Gets windows that are not RDP connection windows
   List<WindowInfo> getNonRdpWindows(List<WindowInfo> windows) {
     return windows.where((window) => !isRdpConnectionWindow(window)).toList();

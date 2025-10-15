@@ -25,6 +25,7 @@ administrative session:i:0
 desktopwidth:i:1920
 desktopheight:i:1080
 session bpp:i:32
+screen mode id:i:2
 winposstr:s:0,1,0,0,800,600
 compression:i:1
 keyboardhook:i:2

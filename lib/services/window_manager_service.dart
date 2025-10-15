@@ -1,5 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:macos_window_toolkit/macos_window_toolkit.dart';
+
+class ScreenInfo {
+  final double width;
+  final double height;
+
+  ScreenInfo(this.width, this.height);
+
+  @override
+  String toString() => 'ScreenInfo(${width}x$height)';
+}
 
 class WindowManagerError {
   final String message;
@@ -82,6 +94,56 @@ class WindowInfo {
 
 class WindowManagerService {
   final MacosWindowToolkit _toolkit = MacosWindowToolkit();
+
+  /// macOS 주 화면의 해상도를 가져옵니다
+  Future<WindowManagerResult<ScreenInfo>> getScreenResolution() async {
+    try {
+      final result = await Process.run('system_profiler', ['SPDisplaysDataType']);
+
+      if (result.exitCode != 0) {
+        final error = WindowManagerError(
+          message: '화면 해상도를 가져올 수 없습니다',
+          details: result.stderr.toString(),
+        );
+        return WindowManagerResult.failure(error);
+      }
+
+      final output = result.stdout.toString();
+
+      // "Resolution: Retina 4.5K (4480 x 2520)" 형식에서 해상도 추출
+      final resolutionRegex = RegExp(r'Resolution:.*?\((\d+)\s*x\s*(\d+)\)');
+      final match = resolutionRegex.firstMatch(output);
+
+      if (match != null) {
+        final width = double.parse(match.group(1)!);
+        final height = double.parse(match.group(2)!);
+        return WindowManagerResult.success(ScreenInfo(width, height));
+      }
+
+      // Retina 형식이 없으면 일반 해상도 찾기 "Resolution: 1920 x 1080"
+      final simpleRegex = RegExp(r'Resolution:\s*(\d+)\s*x\s*(\d+)');
+      final simpleMatch = simpleRegex.firstMatch(output);
+
+      if (simpleMatch != null) {
+        final width = double.parse(simpleMatch.group(1)!);
+        final height = double.parse(simpleMatch.group(2)!);
+        return WindowManagerResult.success(ScreenInfo(width, height));
+      }
+
+      final error = WindowManagerError(
+        message: '화면 해상도를 파싱할 수 없습니다',
+        details: '예상된 형식의 해상도를 찾지 못했습니다',
+      );
+      return WindowManagerResult.failure(error);
+    } catch (e) {
+      final error = WindowManagerError(
+        message: '화면 해상도 조회 중 오류가 발생했습니다',
+        details: e.toString(),
+        originalError: e,
+      );
+      return WindowManagerResult.failure(error);
+    }
+  }
 
   /// Windows App의 모든 창 정보를 가져옵니다
   Future<WindowManagerResult<List<WindowInfo>>> getWindowsAppWindows() async {

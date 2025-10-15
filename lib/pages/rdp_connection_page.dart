@@ -32,6 +32,9 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
   String? _rdpFilePath;
   final List<CapturedImage> _capturedImages = [];
 
+  /// 검증된 RDP 메인 창 ID 목록 (앱 전체에서 공유)
+  static final Set<int> _verifiedWindowIds = {};
+
   @override
   void dispose() {
     _serverController.dispose();
@@ -266,6 +269,13 @@ class _RDPConnectionPageState extends State<RDPConnectionPage> {
                 rdpFilePath: _rdpFilePath,
                 onCloseWindow: _closeWindowById,
                 onCaptureWindow: _captureWindowById,
+                verifiedWindowIds: _verifiedWindowIds,
+                onWindowVerified: (windowId) {
+                  setState(() {
+                    _verifiedWindowIds.add(windowId);
+                    _connectionStatus = '✅ RDP 메인 창 검증 완료! (Window ID: $windowId)';
+                  });
+                },
               ),
             if (_capturedImages.isNotEmpty) ...[
               const SizedBox(height: 16),
